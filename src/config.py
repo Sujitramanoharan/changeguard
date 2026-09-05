@@ -41,3 +41,8 @@ NUMERIC_COLUMNS = [
 
 # Target: we predict whether a change will be "bad" (Failed or Caused-Incident)
 TARGET_COLUMN = "outcome"
+
+# FAISS retrieval paths
+FAISS_INDEX_PATH = MODELS_DIR / "faiss.index"
+FAISS_META_PATH = MODELS_DIR / "faiss_meta.pkl"
+EMBED_MODEL_NAME = "all-MiniLM-L6-v2"
