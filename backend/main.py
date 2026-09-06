@@ -79,5 +79,22 @@ def stats():
 def home():
     return FileResponse(FRONTEND / "index.html")
 
+@app.get("/new.html")
+def new_page():
+    return FileResponse(FRONTEND / "new.html")
 
-app.mount("/", StaticFiles(directory=FRONTEND), name="static")
+@app.get("/history.html")
+def history_page():
+    return FileResponse(FRONTEND / "history.html")
+
+@app.get("/about.html")
+def about_page():
+    return FileResponse(FRONTEND / "about.html")
+
+@app.get("/style.css")
+def css():
+    return FileResponse(FRONTEND / "style.css")
+
+@app.get("/script.js")
+def js():
+    return FileResponse(FRONTEND / "script.js")

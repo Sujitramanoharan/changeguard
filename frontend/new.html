@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>New Assessment - ChangeGuard</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <nav>
+    <span class="logo">ChangeGuard</span>
+    <a href="index.html">Dashboard</a>
+    <a href="new.html" class="active">New Assessment</a>
+    <a href="history.html">History</a>
+    <a href="about.html">About</a>
+  </nav>
+
+  <div class="container">
+    <h1>New Change Assessment</h1>
+    <p class="subtitle">Submit a change request for automated risk analysis.</p>
+
+    <div class="card">
+      <div class="grid">
+        <div>
+          <label>System</label>
+          <select id="system">
+            <option>Payments-Service</option><option>Auth-Service</option>
+            <option>Billing-DB</option><option>Inventory-API</option>
+            <option>Website-Frontend</option><option>Search-Service</option>
+            <option>Notification-Service</option><option>Reporting-DB</option>
+          </select>
+        </div>
+        <div>
+          <label>Change Type</label>
+          <select id="change_type">
+            <option>Config-Update</option><option>Deployment</option>
+            <option>Patch</option><option>Security-Patch</option>
+            <option>Infrastructure-Change</option><option>Database-Schema-Change</option>
+          </select>
+        </div>
+        <div>
+          <label>Change Size</label>
+          <select id="change_size"><option>Small</option><option>Medium</option><option>Large</option></select>
+        </div>
+        <div>
+          <label>Requester Team</label>
+          <select id="requester_team">
+            <option>DevOps</option><option>Platform</option><option>Security</option>
+            <option>Data-Engineering</option><option>Backend</option><option>SRE</option>
+          </select>
+        </div>
+        <div>
+          <label>Requested Window</label>
+          <select id="requested_window">
+            <option>Off-Hours-Weekday</option><option>Weekend</option>
+            <option>Business-Hours-Weekday</option><option>Peak-Hours</option>
+          </select>
+        </div>
+        <div>
+          <label>Rollback Plan Exists</label>
+          <select id="rollback_plan_exists"><option>Yes</option><option>No</option></select>
+        </div>
+        <div>
+          <label>Rollback Plan Tested</label>
+          <select id="rollback_plan_tested"><option>Yes</option><option>No</option><option>None</option></select>
+        </div>
+        <div>
+          <label>Schedule Conflict</label>
+          <select id="schedule_conflict"><option>No</option><option>Yes</option></select>
+        </div>
+      </div>
+      <label>Description</label>
+      <textarea id="description" rows="2" placeholder="Brief description of the change..."></textarea>
+      <button onclick="submitAssessment()">Assess Risk</button>
+    </div>
+
+    <div id="result" class="hidden"></div>
+  </div>
+
+  <script src="script.js"></script>
+</body>
+</html>

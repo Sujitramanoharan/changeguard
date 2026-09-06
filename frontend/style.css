@@ -1,0 +1,47 @@
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
+  background: #f4f6f9; color: #1a2332; line-height: 1.6;
+}
+nav {
+  background: #0b1f3a; padding: 16px 32px; display: flex;
+  align-items: center; gap: 28px;
+}
+nav .logo { color: #fff; font-size: 20px; font-weight: 700; margin-right: auto; }
+nav a { color: #c7d2e0; text-decoration: none; font-size: 15px; }
+nav a:hover, nav a.active { color: #fff; }
+.container { max-width: 900px; margin: 32px auto; padding: 0 20px; }
+h1 { font-size: 26px; margin-bottom: 6px; }
+.subtitle { color: #6b7280; margin-bottom: 24px; }
+.card {
+  background: #fff; border-radius: 10px; padding: 24px;
+  box-shadow: 0 1px 3px rgba(0,0,0,.08); margin-bottom: 20px;
+}
+label { display: block; font-weight: 600; font-size: 14px; margin: 14px 0 6px; }
+select, input, textarea {
+  width: 100%; padding: 10px; border: 1px solid #d1d5db;
+  border-radius: 6px; font-size: 14px; font-family: inherit;
+}
+button {
+  background: #0b1f3a; color: #fff; border: none; padding: 12px 24px;
+  border-radius: 6px; font-size: 15px; cursor: pointer; margin-top: 20px;
+}
+button:hover { background: #14304f; }
+.grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.badge { display: inline-block; padding: 4px 14px; border-radius: 20px;
+  font-weight: 700; font-size: 14px; }
+.badge.High, .badge.REJECT { background: #fdecea; color: #c0392b; }
+.badge.Medium, .badge.REVIEW { background: #fef5e7; color: #b9770e; }
+.badge.Low, .badge.APPROVE { background: #eafaf1; color: #1e8449; }
+.evidence-item { padding: 12px; background: #f8fafc; border-left: 3px solid #0b1f3a;
+  margin: 10px 0; border-radius: 4px; font-size: 14px; }
+.stats { display: grid; grid-template-columns: repeat(3,1fr); gap: 16px; }
+.stat-box { background: #fff; padding: 20px; border-radius: 10px; text-align: center;
+  box-shadow: 0 1px 3px rgba(0,0,0,.08); }
+.stat-box .num { font-size: 32px; font-weight: 700; color: #0b1f3a; }
+.stat-box .lbl { color: #6b7280; font-size: 13px; }
+table { width: 100%; border-collapse: collapse; background: #fff; border-radius: 10px; overflow: hidden; }
+th, td { padding: 12px; text-align: left; border-bottom: 1px solid #eef1f5; font-size: 14px; }
+th { background: #0b1f3a; color: #fff; }
+.hidden { display: none; }
+.spinner { text-align: center; padding: 30px; color: #6b7280; }
