@@ -79,6 +79,10 @@ def stats():
 def home():
     return FileResponse(FRONTEND / "index.html")
 
+@app.get("/index.html")
+def index_page():
+    return FileResponse(FRONTEND / "index.html")
+
 @app.get("/new.html")
 def new_page():
     return FileResponse(FRONTEND / "new.html")

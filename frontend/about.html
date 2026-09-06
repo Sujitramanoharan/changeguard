@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>About - ChangeGuard</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <nav>
+    <span class="logo">ChangeGuard</span>
+    <a href="index.html">Dashboard</a>
+    <a href="new.html">New Assessment</a>
+    <a href="history.html">History</a>
+    <a href="about.html" class="active">About</a>
+  </nav>
+
+  <div class="container">
+    <h1>About ChangeGuard</h1>
+    <p class="subtitle">Agentic, evidence-grounded risk assessment for enterprise IT changes.</p>
+
+    <div class="card">
+      <h3 style="margin-bottom:8px">The Problem</h3>
+      <p>Every production change in a large IT organisation must clear a Change Advisory Board (CAB).
+      This review is manual, slow, and inconsistent &mdash; low-risk changes are rubber-stamped while
+      genuinely risky ones slip through, and poor change approval is a leading cause of major IT outages.</p>
+    </div>
+
+    <div class="card">
+      <h3 style="margin-bottom:8px">How ChangeGuard Works</h3>
+      <p>Given a change request, ChangeGuard acts as an agent: it gathers evidence, reasons over it,
+      and produces an auditable recommendation.</p>
+      <div class="evidence-item"><b>1. ML Risk Model</b> &mdash; predicts failure probability from change attributes.</div>
+      <div class="evidence-item"><b>2. Similar-Change Retrieval (FAISS)</b> &mdash; finds comparable past changes and their outcomes.</div>
+      <div class="evidence-item"><b>3. Evidence Tools</b> &mdash; incident history, schedule conflicts, rollback status.</div>
+      <div class="evidence-item"><b>4. LLM Reasoning</b> &mdash; weighs all evidence and writes a cited justification.</div>
+    </div>
+
+    <div class="card">
+      <h3 style="margin-bottom:8px">Why It Matters</h3>
+      <p>Every recommendation is grounded in retrieved evidence, so decisions are consistent,
+      faster, and auditable &mdash; assisting human CAB reviewers rather than replacing them.</p>
+    </div>
+  </div>
+</body>
+</html>

@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>History - ChangeGuard</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <nav>
+    <span class="logo">ChangeGuard</span>
+    <a href="index.html">Dashboard</a>
+    <a href="new.html">New Assessment</a>
+    <a href="history.html" class="active">History</a>
+    <a href="about.html">About</a>
+  </nav>
+
+  <div class="container">
+    <h1>Assessment History</h1>
+    <p class="subtitle">All past change risk assessments.</p>
+    <div id="tablebox" class="card">Loading...</div>
+  </div>
+
+  <script>
+    async function loadHistory() {
+      const box = document.getElementById("tablebox");
+      try {
+        const res = await fetch("/api/history");
+        const rows = await res.json();
+        if (rows.length === 0) {
+          box.innerHTML = "<p style='color:#6b7280'>No assessments yet. Submit one from the New Assessment page.</p>";
+          return;
+        }
+        let html = `<table><tr>
+          <th>Date</th><th>System</th><th>Change Type</th>
+          <th>Risk</th><th>Recommendation</th></tr>`;
+        for (const r of rows) {
+          html += `<tr>
+            <td>${r.created_at}</td>
+            <td>${r.system}</td>
+            <td>${r.change_type}</td>
+            <td><span class="badge ${r.risk_level}">${r.risk_level}</span></td>
+            <td><span class="badge ${r.recommendation}">${r.recommendation}</span></td>
+          </tr>`;
+        }
+        html += "</table>";
+        box.innerHTML = html;
+      } catch (e) {
+        box.innerHTML = "<p>Error loading history.</p>";
+      }
+    }
+    loadHistory();
+  </script>
+</body>
+</html>

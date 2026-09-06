@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Dashboard - ChangeGuard</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <nav>
+    <span class="logo">ChangeGuard</span>
+    <a href="index.html" class="active">Dashboard</a>
+    <a href="new.html">New Assessment</a>
+    <a href="history.html">History</a>
+    <a href="about.html">About</a>
+  </nav>
+
+  <div class="container">
+    <h1>Dashboard</h1>
+    <p class="subtitle">Overview of change risk assessments.</p>
+
+    <div class="stats">
+      <div class="stat-box"><div class="num" id="total">-</div><div class="lbl">Total Assessments</div></div>
+      <div class="stat-box"><div class="num" id="high">-</div><div class="lbl">High Risk</div></div>
+      <div class="stat-box"><div class="num" id="rejected">-</div><div class="lbl">Rejected</div></div>
+    </div>
+
+    <div class="card" style="margin-top:24px">
+      <h3 style="margin-bottom:10px">Get Started</h3>
+      <p style="color:#6b7280">Submit a change request to receive an automated, evidence-grounded risk assessment.</p>
+      <a href="new.html"><button>New Assessment</button></a>
+    </div>
+  </div>
+
+  <script>
+    async function loadStats() {
+      try {
+        const res = await fetch("/api/stats");
+        const d = await res.json();
+        document.getElementById("total").textContent = d.total;
+        document.getElementById("high").textContent = d.high_risk;
+        document.getElementById("rejected").textContent = d.rejected;
+      } catch (e) {
+        document.getElementById("total").textContent = "0";
+        document.getElementById("high").textContent = "0";
+        document.getElementById("rejected").textContent = "0";
+      }
+    }
+    loadStats();
+  </script>
+</body>
+</html>
