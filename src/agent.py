@@ -7,6 +7,8 @@ Flow (perceive -> gather evidence via tools -> reason -> recommend):
   3. Gather incident / schedule / rollback evidence (tools)
   4. Send all evidence to Groq -> reasoned recommendation + justification
 """
+import truststore
+truststore.inject_into_ssl()
 import os
 import json
 from pathlib import Path
