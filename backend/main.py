@@ -72,6 +72,9 @@ def history():
 @app.get("/api/stats")
 def stats():
     return get_stats()
+@app.get("/health")
+def health():
+    return {"status": "ok"}
 
 
 # --- serve the frontend pages ---
