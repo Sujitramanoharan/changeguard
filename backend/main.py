@@ -9,6 +9,7 @@ sys.path.append(str(Path(__file__).parent.parent / "src"))
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
+from agent_graph import assess_change_autonomous
 from pydantic import BaseModel
 
 from agent import assess_change
@@ -61,6 +62,19 @@ def assess(req: ChangeRequest):
         "recommendation": rec,
         "risk_level": lvl,
         "justification": jus,
+    }
+@app.post("/api/assess-autonomous")
+def assess_autonomous(req: ChangeRequest):
+    change = req.dict()
+    result = assess_change_autonomous(change)
+    rec, lvl, jus = parse_assessment(result["final_answer"])
+    save_assessment(change, {"risk_probability": 0, "risk_level": lvl}, rec, lvl, jus)
+    return {
+        "recommendation": rec,
+        "risk_level": lvl,
+        "justification": jus,
+        "tools_called": result["tools_called"],
+        "num_tool_calls": result["num_tool_calls"],
     }
 
 
