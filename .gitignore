@@ -7,3 +7,6 @@ models/
 .DS_Store
 *.db
 changeguard.db
+# Frontend
+web/node_modules/
+frontend_dist/

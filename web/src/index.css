@@ -1,0 +1,24 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap');
+@import "tailwindcss";
+
+body { font-family: 'Inter', system-ui, sans-serif; }
+
+@keyframes fadeSlideIn { from { opacity:0; transform:translateY(8px);} to {opacity:1; transform:translateY(0);} }
+.animate-in { animation: fadeSlideIn .35s ease; }
+
+@keyframes spin { to { transform: rotate(360deg); } }
+.spinner { animation: spin .7s linear infinite; }
+
+@theme {
+  --color-accent: #3730e0;
+  --color-accent-hover: #2c22c9;
+  --color-accent-soft: #eeecfd;
+  --color-ink: #14161f;
+  --color-ink-soft: #4a4f5e;
+  --color-ink-faint: #8a8f9c;
+  --color-risk-high: #d0362f;
+  --color-risk-med: #b9720e;
+  --color-risk-low: #1a8a54;
+  --font-sans: 'Inter', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
+}
