@@ -1,4 +1,7 @@
-"""Find similar past changes using the FAISS index."""
+
+import truststore
+truststore.inject_into_ssl()
+
 import faiss
 import joblib
 from sentence_transformers import SentenceTransformer

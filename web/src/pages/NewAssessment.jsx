@@ -55,7 +55,7 @@ const PRESETS = {
   },
 };
 
-const DEFAULTS = PRESETS.highRisk;
+const DEFAULTS = PRESETS.lowRisk;
 
 export default function NewAssessment() {
   const [mode, setMode] = useState("controlled"); // "controlled" | "autonomous"
@@ -119,7 +119,7 @@ export default function NewAssessment() {
         setResult({ ...data, mode: "autonomous" });
       }
     } catch (e) {
-      setError("Could not reach the ChangeGuard engine backend. Ensure server is running on port 8000.");
+      setError("Could not reach the ChangeGuard engine backend. Ensure server is running on port 7860.");
     } finally {
       clearInterval(interval);
       setLoading(false);
@@ -430,7 +430,7 @@ export default function NewAssessment() {
                         {(s.similarity * 100).toFixed(0)}% match
                       </span>
                     </div>
-                    <Badge value={s.outcome === "Success" ? "Low" : (s.outcome === "Failed" ? "Medium" : "High")} />
+                    <Badge value={s.outcome} />
                   </div>
                 ))}
               </div>
