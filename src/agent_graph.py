@@ -4,87 +4,74 @@ ChangeGuard autonomous agent (LangGraph version).
 Unlike the fixed-sequence pipeline in agent.py, this agent LOOP lets the LLM
 decide which tools to call and in what order, and can call a tool again if
 needed, before producing a final recommendation.
+
+Phase 2:
+- The client provides only current change-request fields.
+- Historical ML features are derived by the backend.
+- The ML model receives the complete 11-feature enriched change.
 """
+
 import os
 import json
+import operator
 from pathlib import Path
 from typing import TypedDict, Annotated, Sequence
-import operator
+
+import truststore
+truststore.inject_into_ssl()
 
 from dotenv import load_dotenv
-from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage, ToolMessage, AIMessage
+from langchain_core.messages import (
+    BaseMessage,
+    HumanMessage,
+    SystemMessage,
+    ToolMessage,
+    AIMessage,
+)
 from langchain_core.tools import tool
 from langgraph.graph import StateGraph, END
 
 from predict import predict_risk
 from retrieval import find_similar_changes
-from tools import get_incident_history, check_schedule_conflict, get_rollback_status
+from tools import (
+    get_incident_history,
+    check_schedule_conflict,
+    get_rollback_status,
+)
 from build_index import change_to_text
-
-load_dotenv(dotenv_path=Path(__file__).parent.parent / ".env")
-
-_CURRENT_CHANGE = {}  # holds the change dict for the currently-running tool calls
+from context import derive_change_context
+from risk_policy import calculate_risk_policy
 
 
-# ---------- Wrap existing functions as LangChain tools the LLM can call ----------
-@tool
-def ml_risk_score() -> str:
-    """Get the ML model's predicted failure risk for the current change request."""
-    result = predict_risk(_CURRENT_CHANGE)
-    return json.dumps(result)
+# -------------------------------------------------------------------
+# Environment
+# -------------------------------------------------------------------
+
+load_dotenv(
+    dotenv_path=Path(__file__).parent.parent / ".env"
+)
 
 
-@tool
-def similar_past_changes(k: int = 5) -> str:
-    """Find the k most similar past changes and their real outcomes (RAG retrieval)."""
-    query = change_to_text({**_CURRENT_CHANGE, "description": _CURRENT_CHANGE.get("description", "")})
-    results = find_similar_changes(query, k=k)
-    return json.dumps(results)
+# -------------------------------------------------------------------
+# Current change
+# -------------------------------------------------------------------
+# NOTE:
+# This global is acceptable for the current local/test implementation.
+# It will be replaced with request-scoped state during Phase 4 so that
+# concurrent API requests cannot interfere with each other.
+
+_CURRENT_CHANGE = {}
 
 
-@tool
-def incident_history() -> str:
-    """Get recent incident history for the system affected by this change."""
-    return json.dumps(get_incident_history(_CURRENT_CHANGE["system"]))
+# -------------------------------------------------------------------
+# System prompt
+# -------------------------------------------------------------------
 
+SYSTEM_PROMPT = """
+You are ChangeGuard, an autonomous agent assisting an IT Change Advisory Board.
 
-@tool
-def schedule_conflicts() -> str:
-    """Check whether the requested time window is historically riskier / has conflicts."""
-    return json.dumps(check_schedule_conflict(_CURRENT_CHANGE["requested_window"]))
-
-
-@tool
-def rollback_safety() -> str:
-    """Assess the rollback plan safety net for this change."""
-    return json.dumps(get_rollback_status(
-        _CURRENT_CHANGE["rollback_plan_exists"],
-        _CURRENT_CHANGE.get("rollback_plan_tested", "None"),
-    ))
-
-
-TOOLS = [ml_risk_score, similar_past_changes, incident_history, schedule_conflicts, rollback_safety]
-TOOLS_BY_NAME = {t.name: t for t in TOOLS}
-
-
-def assess_change_autonomous(change: dict, max_steps: int = 8) -> dict:
-    """Run the autonomous LangGraph agent on a change request."""
-    global _CURRENT_CHANGE
-    _CURRENT_CHANGE = change
-
-    tool_calls_made = []
-    final_text = None
-
-    if os.environ.get("GROQ_API_KEY"):
-        try:
-            from langchain_groq import ChatGroq
-            _llm = ChatGroq(model="openai/gpt-oss-120b", temperature=0).bind_tools(TOOLS)
-
-            class AgentState(TypedDict):
-                messages: Annotated[Sequence[BaseMessage], operator.add]
-                SYSTEM_PROMPT = """You are ChangeGuard, an autonomous agent assisting an IT Change Advisory Board.
-
-Your job is to gather evidence about the proposed change before producing a final assessment.
+Your job is to gather evidence about the proposed change before producing a
+final assessment.
 
 Available evidence tools:
 - ml_risk_score
@@ -97,13 +84,17 @@ IMPORTANT EVIDENCE RULES:
 
 1. You MUST call ml_risk_score.
 
-2. You MUST call similar_past_changes before making any statement about similar historical changes, their outcomes, or their failure rate.
+2. You MUST call similar_past_changes before making any statement about
+   similar historical changes, their outcomes, or their failure rate.
 
-3. You MUST call incident_history before making any statement about incidents or historical failure rate for the affected system.
+3. You MUST call incident_history before making any statement about incidents
+   or historical failure rate for the affected system.
 
-4. You MUST call schedule_conflicts before making any statement about schedule conflicts or historical risk of the requested window.
+4. You MUST call schedule_conflicts before making any statement about schedule
+   conflicts or historical risk of the requested window.
 
-5. You MUST call rollback_safety before making any statement about rollback readiness or rollback safety.
+5. You MUST call rollback_safety before making any statement about rollback
+   readiness or rollback safety.
 
 6. Do NOT invent, assume, or infer evidence that was not returned by a tool.
 
@@ -111,99 +102,550 @@ IMPORTANT EVIDENCE RULES:
    - the original change request, or
    - evidence returned by tools that you actually called.
 
-8. If evidence is needed but has not been gathered, call the appropriate tool first.
+8. If evidence is needed but has not been gathered, call the appropriate tool
+   first.
 
-9. You may decide which additional tools are necessary, but gather all evidence required to support every factual claim in your final justification.
+9. You may decide which additional tools are necessary, but gather all
+   evidence required to support every factual claim in your final
+   justification.
 
-10. Once enough evidence has been gathered, make NO further tool calls and respond exactly in this format:
+10. Once enough evidence has been gathered, make NO further tool calls and
+    respond exactly in this format:
 
 RECOMMENDATION: <APPROVE / REVIEW / REJECT>
 RISK LEVEL: <Low / Medium / High>
 JUSTIFICATION: <2-4 sentences citing only evidence actually gathered>
 """
 
+
+# -------------------------------------------------------------------
+# LangGraph state
+# -------------------------------------------------------------------
+
+class AgentState(TypedDict):
+    messages: Annotated[Sequence[BaseMessage], operator.add]
+
+
+# -------------------------------------------------------------------
+# LangChain tools
+# -------------------------------------------------------------------
+
+@tool
+def ml_risk_score() -> str:
+    """Get the ML model's predicted failure risk for the current change request."""
+
+    result = predict_risk(_CURRENT_CHANGE)
+
+    return json.dumps(result)
+
+
+@tool
+def similar_past_changes(k: int = 5) -> str:
+    """Find the k most similar past changes and their real outcomes."""
+
+    query = change_to_text(
+        {
+            **_CURRENT_CHANGE,
+            "description": _CURRENT_CHANGE.get("description", ""),
+        }
+    )
+
+    results = find_similar_changes(query, k=k)
+
+    return json.dumps(results)
+
+
+@tool
+def incident_history() -> str:
+    """Get historical incident information for the affected system."""
+
+    return json.dumps(
+        get_incident_history(
+            _CURRENT_CHANGE["system"]
+        )
+    )
+
+
+@tool
+def schedule_conflicts() -> str:
+    """Check historical risk and scheduling conflicts for the requested window."""
+
+    return json.dumps(
+        check_schedule_conflict(
+            _CURRENT_CHANGE["requested_window"]
+        )
+    )
+
+
+@tool
+def rollback_safety() -> str:
+    """Assess the rollback plan safety net for this change."""
+
+    return json.dumps(
+        get_rollback_status(
+            _CURRENT_CHANGE["rollback_plan_exists"],
+            _CURRENT_CHANGE.get(
+                "rollback_plan_tested",
+                "None",
+            ),
+        )
+    )
+
+
+TOOLS = [
+    ml_risk_score,
+    similar_past_changes,
+    incident_history,
+    schedule_conflicts,
+    rollback_safety,
+]
+
+TOOLS_BY_NAME = {
+    t.name: t
+    for t in TOOLS
+}
+
+
+# -------------------------------------------------------------------
+# Autonomous assessment
+# -------------------------------------------------------------------
+
+def assess_change_autonomous(
+    change: dict,
+    max_steps: int = 8,
+) -> dict:
+    """
+    Run the autonomous LangGraph agent.
+
+    The LLM may choose evidence tools, but the final recommendation
+    and risk level are always determined by the shared deterministic
+    ChangeGuard risk policy.
+    """
+
+    global _CURRENT_CHANGE
+
+    # ---------------------------------------------------------------
+    # 1. Derive backend historical context
+    # ---------------------------------------------------------------
+
+    historical_context = derive_change_context(change)
+
+    # ---------------------------------------------------------------
+    # 2. Build complete 11-feature change
+    # ---------------------------------------------------------------
+
+    enriched_change = {
+        **change,
+        **historical_context,
+    }
+
+    _CURRENT_CHANGE = enriched_change
+
+    # ---------------------------------------------------------------
+    # 3. Gather authoritative deterministic evidence
+    # ---------------------------------------------------------------
+    #
+    # These values are used by the shared risk policy.
+    # The LLM may gather evidence independently for explanation,
+    # but it cannot override this decision.
+    # ---------------------------------------------------------------
+
+    query = change_to_text(
+        {
+            **change,
+            "description": change.get(
+                "description",
+                "",
+            ),
+        }
+    )
+
+    similar_changes = find_similar_changes(
+        query,
+        k=5,
+    )
+
+    schedule_data = check_schedule_conflict(
+        change["requested_window"]
+    )
+
+    ml_prediction = predict_risk(
+        enriched_change
+    )
+
+    # ---------------------------------------------------------------
+    # 4. Authoritative deterministic risk policy
+    # ---------------------------------------------------------------
+
+    policy = calculate_risk_policy(
+        ml_prediction,
+        change,
+        similar_changes,
+        schedule_data,
+    )
+
+    policy_recommendation = policy[
+        "recommendation"
+    ]
+
+    policy_risk_level = policy[
+        "risk_level"
+    ]
+
+    # ---------------------------------------------------------------
+    # 5. Autonomous LangGraph loop
+    # ---------------------------------------------------------------
+
+    tool_calls_made = []
+    llm_justification = None
+
+    if os.environ.get("GROQ_API_KEY"):
+
+        try:
+            from langchain_groq import ChatGroq
+
+            autonomous_prompt = SYSTEM_PROMPT + f"""
+
+IMPORTANT DECISION CONTROL:
+
+The authoritative ChangeGuard risk policy has already determined:
+
+RECOMMENDATION: {policy_recommendation}
+RISK LEVEL: {policy_risk_level}
+
+You MUST NOT change these values.
+
+You may use the available tools to gather evidence supporting
+the explanation.
+
+Your final response must contain ONLY:
+
+JUSTIFICATION: <2-4 sentences using only evidence actually gathered>
+
+Do not output RECOMMENDATION or RISK LEVEL.
+Do not create a different recommendation.
+Do not create a different risk level.
+"""
+
+            _llm = ChatGroq(
+                model="openai/gpt-oss-120b",
+                temperature=0,
+            ).bind_tools(TOOLS)
+
+            # -------------------------------------------------------
+            # Model node
+            # -------------------------------------------------------
+
             def call_model(state: AgentState):
-                response = _llm.invoke([SystemMessage(content=SYSTEM_PROMPT)] + list(state["messages"]))
-                return {"messages": [response]}
+
+                response = _llm.invoke(
+                    [
+                        SystemMessage(
+                            content=autonomous_prompt
+                        )
+                    ]
+                    + list(state["messages"])
+                )
+
+                return {
+                    "messages": [response]
+                }
+
+            # -------------------------------------------------------
+            # Tool node
+            # -------------------------------------------------------
 
             def call_tools(state: AgentState):
+
                 last = state["messages"][-1]
+
                 outputs = []
+
                 for call in last.tool_calls:
-                    result = TOOLS_BY_NAME[call["name"]].invoke(call["args"])
-                    outputs.append(ToolMessage(content=str(result), tool_call_id=call["id"], name=call["name"]))
-                return {"messages": outputs}
+
+                    result = TOOLS_BY_NAME[
+                        call["name"]
+                    ].invoke(
+                        call["args"]
+                    )
+
+                    outputs.append(
+                        ToolMessage(
+                            content=str(result),
+                            tool_call_id=call["id"],
+                            name=call["name"],
+                        )
+                    )
+
+                return {
+                    "messages": outputs
+                }
+
+            # -------------------------------------------------------
+            # Decide whether another tool round is required
+            # -------------------------------------------------------
 
             def should_continue(state: AgentState):
-                last = state["messages"][-1]
-                return "tools" if getattr(last, "tool_calls", None) else "end"
 
-            _graph = StateGraph(AgentState)
-            _graph.add_node("agent", call_model)
-            _graph.add_node("tools", call_tools)
-            _graph.set_entry_point("agent")
-            _graph.add_conditional_edges("agent", should_continue, {"tools": "tools", "end": END})
-            _graph.add_edge("tools", "agent")
+                last = state["messages"][-1]
+
+                if getattr(
+                    last,
+                    "tool_calls",
+                    None,
+                ):
+                    return "tools"
+
+                return "end"
+
+            # -------------------------------------------------------
+            # Build graph
+            # -------------------------------------------------------
+
+            _graph = StateGraph(
+                AgentState
+            )
+
+            _graph.add_node(
+                "agent",
+                call_model,
+            )
+
+            _graph.add_node(
+                "tools",
+                call_tools,
+            )
+
+            _graph.set_entry_point(
+                "agent"
+            )
+
+            _graph.add_conditional_edges(
+                "agent",
+                should_continue,
+                {
+                    "tools": "tools",
+                    "end": END,
+                },
+            )
+
+            _graph.add_edge(
+                "tools",
+                "agent",
+            )
+
             _compiled = _graph.compile()
 
-            initial = f"Assess this change request:\n{json.dumps(change, indent=2)}"
-            state = {"messages": [HumanMessage(content=initial)]}
-            result_state = _compiled.invoke(state, {"recursion_limit": max_steps * 2})
+            # -------------------------------------------------------
+            # Initial request
+            # -------------------------------------------------------
 
-            for m in result_state["messages"]:
-                if isinstance(m, AIMessage) and getattr(m, "tool_calls", None):
-                    for c in m.tool_calls:
-                        tool_calls_made.append(c["name"])
+            initial = (
+                "Assess this change request:\n"
+                + json.dumps(
+                    change,
+                    indent=2,
+                )
+            )
 
-            final_text = result_state["messages"][-1].content
+            state = {
+                "messages": [
+                    HumanMessage(
+                        content=initial
+                    )
+                ]
+            }
+
+            # -------------------------------------------------------
+            # Execute autonomous graph
+            # -------------------------------------------------------
+
+            result_state = _compiled.invoke(
+                state,
+                {
+                    "recursion_limit": max_steps * 2
+                },
+            )
+
+            # -------------------------------------------------------
+            # Record tools actually selected by LLM
+            # -------------------------------------------------------
+
+            for message in result_state["messages"]:
+
+                if (
+                    isinstance(
+                        message,
+                        AIMessage,
+                    )
+                    and getattr(
+                        message,
+                        "tool_calls",
+                        None,
+                    )
+                ):
+
+                    for call in message.tool_calls:
+
+                        tool_calls_made.append(
+                            call["name"]
+                        )
+
+            # -------------------------------------------------------
+            # Extract LLM justification only
+            # -------------------------------------------------------
+
+            final_content = (
+                result_state["messages"][-1]
+                .content
+            )
+
+            if isinstance(
+                final_content,
+                str,
+            ):
+
+                llm_justification = (
+                    final_content.strip()
+                )
+
+                if llm_justification.upper().startswith(
+                    "JUSTIFICATION:"
+                ):
+
+                    llm_justification = (
+                        llm_justification[
+                            len("JUSTIFICATION:")
+                        ].strip()
+                    )
+
+                # Reject malformed/empty responses.
+                if not llm_justification:
+
+                    llm_justification = None
+
         except Exception as err:
-            print(f"[ChangeGuard LangGraph Warning] Autonomous loop error ({err}). Executing deterministic fallback.")
 
-    if not final_text:
-        # Fallback autonomous step simulation calling all evidence tools
-        tool_calls_made = ["ml_risk_score", "similar_past_changes", "incident_history", "schedule_conflicts", "rollback_safety"]
-        ml_data = json.loads(ml_risk_score.invoke({}))
-        sim_data = json.loads(similar_past_changes.invoke({}))
-        inc_data = json.loads(incident_history.invoke({}))
-        sched_data = json.loads(schedule_conflicts.invoke({}))
-        roll_data = json.loads(rollback_safety.invoke({}))
+            print(
+                "[ChangeGuard LangGraph Warning] "
+                f"Autonomous loop error ({err}). "
+                "Using deterministic fallback."
+            )
 
-        prob = ml_data.get("risk_probability", 0.3)
-        has_rollback = change.get("rollback_plan_exists") == "Yes"
-        tested_rollback = change.get("rollback_plan_tested") == "Yes"
+    # ---------------------------------------------------------------
+    # 6. Deterministic fallback explanation
+    # ---------------------------------------------------------------
 
-        if prob > 0.5 or not has_rollback:
-            rec = "REJECT"
-            level = "High"
-        elif prob > 0.25 or not tested_rollback:
-            rec = "REVIEW"
-            level = "Medium"
-        else:
-            rec = "APPROVE"
-            level = "Low"
+    if not llm_justification:
 
-        just = (f"Autonomous Agent executed {len(tool_calls_made)} evidence tools. ML risk model score is {round(prob*100)}%. "
-                f"{inc_data.get('note', '')} {sched_data.get('note', '')} {roll_data.get('note', '')}")
+        incidents = get_incident_history(
+            change["system"]
+        )
 
-        final_text = f"RECOMMENDATION: {rec}\nRISK LEVEL: {level}\nJUSTIFICATION: {just}"
+        rollback = get_rollback_status(
+            change["rollback_plan_exists"],
+            change.get(
+                "rollback_plan_tested",
+                "None",
+            ),
+        )
+
+        justification_parts = []
+
+        prob = ml_prediction.get(
+            "risk_probability",
+            0.3,
+        )
+
+        justification_parts.append(
+            f"ML Model predicts a "
+            f"{round(prob * 100)}% failure risk "
+            f"for {change.get('system', 'this system')}."
+        )
+
+        failed_similar_count = policy[
+            "failed_similar_count"
+        ]
+
+        if len(similar_changes) > 0:
+
+            justification_parts.append(
+                f"Historical analysis of "
+                f"{len(similar_changes)} similar changes "
+                f"showed {failed_similar_count} "
+                f"past failures or incidents."
+            )
+
+        if incidents.get("note"):
+
+            justification_parts.append(
+                incidents["note"]
+            )
+
+        if not policy["has_rollback"]:
+
+            justification_parts.append(
+                "CRITICAL: No rollback plan is "
+                "present for this change."
+            )
+
+        elif not policy["tested_rollback"]:
+
+            justification_parts.append(
+                "Rollback plan is documented but "
+                "has not been tested in staging."
+            )
+
+        if policy["has_schedule_conflict"]:
+
+            justification_parts.append(
+                f"Scheduled during "
+                f"{change.get('requested_window', 'the requested window')} "
+                f"with a known scheduling risk."
+            )
+
+        llm_justification = " ".join(
+            justification_parts
+        )
+
+        if not tool_calls_made:
+
+            tool_calls_made = [
+                "ml_risk_score",
+                "similar_past_changes",
+                "incident_history",
+                "schedule_conflicts",
+                "rollback_safety",
+            ]
+
+    # ---------------------------------------------------------------
+    # 7. Final answer
+    # ---------------------------------------------------------------
+    #
+    # CRITICAL:
+    # Recommendation and risk level ALWAYS come from
+    # calculate_risk_policy().
+    #
+    # The LLM can only provide the explanation.
+    # ---------------------------------------------------------------
+
+    final_text = (
+        f"RECOMMENDATION: "
+        f"{policy_recommendation}\n"
+        f"RISK LEVEL: "
+        f"{policy_risk_level}\n"
+        f"JUSTIFICATION: "
+        f"{llm_justification}"
+    )
 
     return {
         "final_answer": final_text,
         "tools_called": tool_calls_made,
         "num_tool_calls": len(tool_calls_made),
+        "historical_context": historical_context,
+        "enriched_change": enriched_change,
+        "ml_prediction": ml_prediction,
+        "similar_changes": similar_changes,
+        "schedule": schedule_data,
+        "policy": policy,
     }
-
-
-if __name__ == "__main__":
-    test = {
-        "system": "Payments-Service", "change_type": "Database-Schema-Change",
-        "change_size": "Large", "requester_team": "Backend",
-        "requested_window": "Peak-Hours", "rollback_plan_exists": "No",
-        "rollback_plan_tested": "None", "similar_past_changes_count": 5,
-        "similar_past_changes_failure_rate": 0.4,
-        "system_incidents_last_90_days": 3, "schedule_conflict": "Yes",
-        "description": "Adding a new column to the payments transactions table.",
-    }
-    result = assess_change_autonomous(test)
-    print("Tools the agent CHOSE to call:", result["tools_called"])
-    print("\n" + result["final_answer"])

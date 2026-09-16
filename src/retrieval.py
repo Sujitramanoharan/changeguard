@@ -14,17 +14,21 @@ _index = faiss.read_index(str(FAISS_INDEX_PATH))
 _meta = joblib.load(FAISS_META_PATH)
 
 
-def find_similar_changes(query_text, k=5):
-    """Return the k most similar past changes with their outcomes."""
+def find_similar_changes(query_text, k=5, min_similarity=0.70):
+    """Return sufficiently similar past changes with their outcomes."""
     emb = _model.encode([query_text], convert_to_numpy=True).astype("float32")
     faiss.normalize_L2(emb)
     scores, idxs = _index.search(emb, k)
 
     results = []
     for score, i in zip(scores[0], idxs[0]):
+        if score < min_similarity:
+            continue
+
         rec = dict(_meta[i])
         rec["similarity"] = round(float(score), 3)
         results.append(rec)
+
     return results
 
 

@@ -21,23 +21,42 @@ def load_and_prepare():
     X = df[FEATURE_COLUMNS].copy()
     y = df["target"]
 
-    # Encode categorical text columns into numbers, remembering the mapping
+    # Split before fitting encoders.
+    # This prevents preprocessing from learning categories from the test set.
+    X_train, X_test, y_train, y_test = train_test_split(
+        X,
+        y,
+        test_size=0.2,
+        random_state=42,
+        stratify=y,
+    )
+
+    # Fit encoders ONLY on training data.
+    # Then use the same encoders to transform the test data.
     encoders = {}
+
     for col in CATEGORICAL_COLUMNS:
         le = LabelEncoder()
-        X[col] = le.fit_transform(X[col].astype(str))
-        encoders[col] = le
 
-    # 80% train, 20% test, keep class balance
-    X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=0.2, random_state=42, stratify=y
-    )
+        X_train[col] = le.fit_transform(X_train[col].astype(str))
+
+        # Handle a category that appears in the test set but not in training.
+        known_classes = set(le.classes_)
+
+        X_test[col] = X_test[col].astype(str).apply(
+            lambda value: value if value in known_classes else le.classes_[0]
+        )
+
+        X_test[col] = le.transform(X_test[col])
+
+        encoders[col] = le
 
     return X_train, X_test, y_train, y_test, encoders
 
 
 if __name__ == "__main__":
     X_train, X_test, y_train, y_test, encoders = load_and_prepare()
+
     print("Data prepared successfully.")
     print("Training rows:", len(X_train), "| Test rows:", len(X_test))
     print("Features used:", list(X_train.columns))

@@ -70,16 +70,9 @@ class ChangeRequest(BaseModel):
     change_size: str
     requester_team: str
     requested_window: str
-
     rollback_plan_exists: str
     rollback_plan_tested: str = "None"
-
-    similar_past_changes_count: int = 10
-    similar_past_changes_failure_rate: float = 0.2
-    system_incidents_last_90_days: int = 1
-
-    schedule_conflict: str = "No"
-
+    schedule_conflict: str
     description: str = ""
 
 
@@ -191,7 +184,7 @@ def assess_autonomous(req: ChangeRequest):
     #
     # Now both Controlled and Autonomous modes use the
     # actual trained ML model.
-    ml_prediction = predict_risk(change)
+    ml_prediction = predict_risk(result["enriched_change"])
 
     # Store complete autonomous assessment details
     details = {
