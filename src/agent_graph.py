@@ -16,8 +16,10 @@ import json
 import operator
 from pathlib import Path
 from typing import TypedDict, Annotated, Sequence
+from contextvars import ContextVar
 
 import truststore
+
 truststore.inject_into_ssl()
 
 from dotenv import load_dotenv
@@ -53,14 +55,29 @@ load_dotenv(
 
 
 # -------------------------------------------------------------------
-# Current change
+# Request-scoped current change
 # -------------------------------------------------------------------
-# NOTE:
-# This global is acceptable for the current local/test implementation.
-# It will be replaced with request-scoped state during Phase 4 so that
-# concurrent API requests cannot interfere with each other.
+# ContextVar gives each request/execution its own change context.
+# This prevents concurrent autonomous assessments from overwriting
+# each other's change data.
 
-_CURRENT_CHANGE = {}
+_CURRENT_CHANGE: ContextVar[dict | None] = ContextVar(
+    "changeguard_current_change",
+    default=None,
+)
+
+
+def _get_current_change() -> dict:
+    """Return the current request's change data."""
+
+    change = _CURRENT_CHANGE.get()
+
+    if change is None:
+        raise RuntimeError(
+            "No active ChangeGuard request context."
+        )
+
+    return change
 
 
 # -------------------------------------------------------------------
@@ -134,7 +151,9 @@ class AgentState(TypedDict):
 def ml_risk_score() -> str:
     """Get the ML model's predicted failure risk for the current change request."""
 
-    result = predict_risk(_CURRENT_CHANGE)
+    result = predict_risk(
+        _get_current_change()
+    )
 
     return json.dumps(result)
 
@@ -143,14 +162,22 @@ def ml_risk_score() -> str:
 def similar_past_changes(k: int = 5) -> str:
     """Find the k most similar past changes and their real outcomes."""
 
+    change = _get_current_change()
+
     query = change_to_text(
         {
-            **_CURRENT_CHANGE,
-            "description": _CURRENT_CHANGE.get("description", ""),
+            **change,
+            "description": change.get(
+                "description",
+                "",
+            ),
         }
     )
 
-    results = find_similar_changes(query, k=k)
+    results = find_similar_changes(
+        query,
+        k=k,
+    )
 
     return json.dumps(results)
 
@@ -159,9 +186,11 @@ def similar_past_changes(k: int = 5) -> str:
 def incident_history() -> str:
     """Get historical incident information for the affected system."""
 
+    change = _get_current_change()
+
     return json.dumps(
         get_incident_history(
-            _CURRENT_CHANGE["system"]
+            change["system"]
         )
     )
 
@@ -170,9 +199,11 @@ def incident_history() -> str:
 def schedule_conflicts() -> str:
     """Check historical risk and scheduling conflicts for the requested window."""
 
+    change = _get_current_change()
+
     return json.dumps(
         check_schedule_conflict(
-            _CURRENT_CHANGE["requested_window"]
+            change["requested_window"]
         )
     )
 
@@ -181,10 +212,12 @@ def schedule_conflicts() -> str:
 def rollback_safety() -> str:
     """Assess the rollback plan safety net for this change."""
 
+    change = _get_current_change()
+
     return json.dumps(
         get_rollback_status(
-            _CURRENT_CHANGE["rollback_plan_exists"],
-            _CURRENT_CHANGE.get(
+            change["rollback_plan_exists"],
+            change.get(
                 "rollback_plan_tested",
                 "None",
             ),
@@ -199,6 +232,7 @@ TOOLS = [
     schedule_conflicts,
     rollback_safety,
 ]
+
 
 TOOLS_BY_NAME = {
     t.name: t
@@ -222,13 +256,13 @@ def assess_change_autonomous(
     ChangeGuard risk policy.
     """
 
-    global _CURRENT_CHANGE
-
     # ---------------------------------------------------------------
     # 1. Derive backend historical context
     # ---------------------------------------------------------------
 
-    historical_context = derive_change_context(change)
+    historical_context = derive_change_context(
+        change
+    )
 
     # ---------------------------------------------------------------
     # 2. Build complete 11-feature change
@@ -239,12 +273,13 @@ def assess_change_autonomous(
         **historical_context,
     }
 
-    _CURRENT_CHANGE = enriched_change
+    _CURRENT_CHANGE.set(
+        enriched_change
+    )
 
     # ---------------------------------------------------------------
     # 3. Gather authoritative deterministic evidence
     # ---------------------------------------------------------------
-    #
     # These values are used by the shared risk policy.
     # The LLM may gather evidence independently for explanation,
     # but it cannot override this decision.
@@ -327,18 +362,21 @@ Do not create a different recommendation.
 Do not create a different risk level.
 """
 
-            _llm = ChatGroq(
+            llm = ChatGroq(
                 model="openai/gpt-oss-120b",
                 temperature=0,
-            ).bind_tools(TOOLS)
+            ).bind_tools(
+                TOOLS
+            )
 
             # -------------------------------------------------------
             # Model node
             # -------------------------------------------------------
 
-            def call_model(state: AgentState):
-
-                response = _llm.invoke(
+            def call_model(
+                state: AgentState,
+            ):
+                response = llm.invoke(
                     [
                         SystemMessage(
                             content=autonomous_prompt
@@ -355,16 +393,23 @@ Do not create a different risk level.
             # Tool node
             # -------------------------------------------------------
 
-            def call_tools(state: AgentState):
-
+            def call_tools(
+                state: AgentState,
+            ):
                 last = state["messages"][-1]
 
                 outputs = []
 
                 for call in last.tool_calls:
+                    tool_name = call["name"]
+
+                    if tool_name not in TOOLS_BY_NAME:
+                        raise ValueError(
+                            f"Unknown tool requested: {tool_name}"
+                        )
 
                     result = TOOLS_BY_NAME[
-                        call["name"]
+                        tool_name
                     ].invoke(
                         call["args"]
                     )
@@ -373,7 +418,7 @@ Do not create a different risk level.
                         ToolMessage(
                             content=str(result),
                             tool_call_id=call["id"],
-                            name=call["name"],
+                            name=tool_name,
                         )
                     )
 
@@ -385,8 +430,9 @@ Do not create a different risk level.
             # Decide whether another tool round is required
             # -------------------------------------------------------
 
-            def should_continue(state: AgentState):
-
+            def should_continue(
+                state: AgentState,
+            ):
                 last = state["messages"][-1]
 
                 if getattr(
@@ -402,25 +448,25 @@ Do not create a different risk level.
             # Build graph
             # -------------------------------------------------------
 
-            _graph = StateGraph(
+            graph = StateGraph(
                 AgentState
             )
 
-            _graph.add_node(
+            graph.add_node(
                 "agent",
                 call_model,
             )
 
-            _graph.add_node(
+            graph.add_node(
                 "tools",
                 call_tools,
             )
 
-            _graph.set_entry_point(
+            graph.set_entry_point(
                 "agent"
             )
 
-            _graph.add_conditional_edges(
+            graph.add_conditional_edges(
                 "agent",
                 should_continue,
                 {
@@ -429,12 +475,12 @@ Do not create a different risk level.
                 },
             )
 
-            _graph.add_edge(
+            graph.add_edge(
                 "tools",
                 "agent",
             )
 
-            _compiled = _graph.compile()
+            compiled_graph = graph.compile()
 
             # -------------------------------------------------------
             # Initial request
@@ -460,7 +506,7 @@ Do not create a different risk level.
             # Execute autonomous graph
             # -------------------------------------------------------
 
-            result_state = _compiled.invoke(
+            result_state = compiled_graph.invoke(
                 state,
                 {
                     "recursion_limit": max_steps * 2
@@ -486,7 +532,6 @@ Do not create a different risk level.
                 ):
 
                     for call in message.tool_calls:
-
                         tool_calls_made.append(
                             call["name"]
                         )
@@ -519,9 +564,7 @@ Do not create a different risk level.
                         ].strip()
                     )
 
-                # Reject malformed/empty responses.
                 if not llm_justification:
-
                     llm_justification = None
 
         except Exception as err:
@@ -621,8 +664,6 @@ Do not create a different risk level.
     # ---------------------------------------------------------------
     # 7. Final answer
     # ---------------------------------------------------------------
-    #
-    # CRITICAL:
     # Recommendation and risk level ALWAYS come from
     # calculate_risk_policy().
     #

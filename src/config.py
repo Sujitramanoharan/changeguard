@@ -46,3 +46,16 @@ TARGET_COLUMN = "outcome"
 FAISS_INDEX_PATH = MODELS_DIR / "faiss.index"
 FAISS_META_PATH = MODELS_DIR / "faiss_meta.pkl"
 EMBED_MODEL_NAME = "all-MiniLM-L6-v2"
+# Audit/version metadata
+MODEL_VERSION = "risk-model-v1"
+POLICY_VERSION = "risk-policy-v1"
+APP_VERSION = "1.0.0"
+# API / frontend configuration
+CORS_ORIGINS = [
+    origin.strip()
+    for origin in __import__("os").getenv(
+        "CORS_ORIGINS",
+        "http://localhost:5173",
+    ).split(",")
+    if origin.strip()
+]

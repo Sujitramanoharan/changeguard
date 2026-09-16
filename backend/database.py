@@ -3,6 +3,10 @@ import sqlite3
 import json
 from pathlib import Path
 from datetime import datetime
+import sys
+sys.path.append(str(Path(__file__).parent.parent / "src"))
+
+from config import MODEL_VERSION, POLICY_VERSION
 
 DB_PATH = Path(__file__).parent.parent / "changeguard.db"
 
@@ -26,42 +30,86 @@ def init_db():
             details_json TEXT
         )
     """)
-    # Migration check for existing DBs without details_json column
-    try:
-        conn.execute("ALTER TABLE assessments ADD COLUMN details_json TEXT")
-    except sqlite3.OperationalError:
-        pass
-    conn.commit()
-    conn.close()
+    # Backward-compatible database migrations.
+    # Existing assessment records are preserved.
+    migrations = [
+        ("rollback_plan_tested", "TEXT"),
+        ("schedule_conflict", "TEXT"),
+        ("mode", "TEXT"),
+        ("model_version", "TEXT"),
+        ("policy_version", "TEXT"),
+    ]
 
+    for column_name, column_type in migrations:
+        try:
+            conn.execute(
+                f"ALTER TABLE assessments "
+                f"ADD COLUMN {column_name} {column_type}"
+            )
+        except sqlite3.OperationalError:
+            pass
 
-def save_assessment(change, ml, recommendation, risk_level, justification, details=None):
+def save_assessment(
+    change,
+    ml,
+    recommendation,
+    risk_level,
+    justification,
+    details=None,
+):
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
+
     details_str = json.dumps(details) if details else None
-    cur.execute("""
+
+    cur.execute(
+        """
         INSERT INTO assessments
-        (created_at, system, change_type, change_size, requester_team,
-         requested_window, rollback_plan_exists, risk_probability,
-         risk_level, recommendation, justification, details_json)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
-    """, (
-        datetime.now().strftime("%Y-%m-%d %H:%M"),
-        change.get("system", "Unknown"), 
-        change.get("change_type", "Unknown"), 
-        change.get("change_size", "Medium"),
-        change.get("requester_team", "Engineering"), 
-        change.get("requested_window", "Business-Hours-Weekday"),
-        change.get("rollback_plan_exists", "Yes"), 
-        ml.get("risk_probability", 0.0) if ml else 0.0,
-        risk_level, 
-        recommendation, 
-        justification,
-        details_str
-    ))
+        (
+            created_at,
+            system,
+            change_type,
+            change_size,
+            requester_team,
+            requested_window,
+            rollback_plan_exists,
+            rollback_plan_tested,
+            schedule_conflict,
+            risk_probability,
+            risk_level,
+            recommendation,
+            justification,
+            details_json,
+            mode,
+            model_version,
+            policy_version
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            datetime.now().strftime("%Y-%m-%d %H:%M"),
+            change.get("system", "Unknown"),
+            change.get("change_type", "Unknown"),
+            change.get("change_size", "Medium"),
+            change.get("requester_team", "Engineering"),
+            change.get("requested_window", "Business-Hours-Weekday"),
+            change.get("rollback_plan_exists", "Yes"),
+            change.get("rollback_plan_tested", "None"),
+            change.get("schedule_conflict", "No"),
+            ml.get("risk_probability", 0.0) if ml else 0.0,
+            risk_level,
+            recommendation,
+            justification,
+            details_str,
+            details.get("mode", "controlled") if details else "controlled",
+            MODEL_VERSION,
+            POLICY_VERSION,
+        ),
+    )
     new_id = cur.lastrowid
     conn.commit()
     conn.close()
+
     return new_id
 
 
