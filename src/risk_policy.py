@@ -1,5 +1,6 @@
 """Shared deterministic risk policy for ChangeGuard."""
 
+
 def calculate_risk_policy(
     ml,
     change,
@@ -9,9 +10,9 @@ def calculate_risk_policy(
     """
     Calculate the authoritative recommendation and risk level.
 
-    This preserves the existing controlled-agent fallback policy
-    so both controlled and autonomous modes can use the same
-    decision logic.
+    The deterministic policy remains authoritative for the final
+    recommendation and risk level. Historical schedule evidence is
+    tracked separately from an actual conflict on the submitted change.
     """
 
     prob = ml.get("risk_probability", 0.3)
@@ -25,9 +26,26 @@ def calculate_risk_policy(
     has_rollback = change.get("rollback_plan_exists") == "Yes"
     tested_rollback = change.get("rollback_plan_tested") == "Yes"
 
-    has_conflict = (
+    # Actual conflict reported for this specific change.
+    actual_schedule_conflict = (
         change.get("schedule_conflict") == "Yes"
-        or schedule.get("conflict_frequency", 0) > 0.3
+    )
+
+    # Historical evidence about conflicts in the requested window.
+    schedule_conflict_frequency = float(
+        schedule.get("conflict_frequency", 0)
+    )
+
+    historical_schedule_risk = (
+        schedule_conflict_frequency > 0.3
+    )
+
+    # Schedule contributes to the risk score when either:
+    # 1. this specific change has an actual conflict, or
+    # 2. historical data shows a high-conflict requested window.
+    schedule_risk = (
+        actual_schedule_conflict
+        or historical_schedule_risk
     )
 
     # Existing ChangeGuard composite risk policy.
@@ -38,7 +56,7 @@ def calculate_risk_policy(
     elif not tested_rollback:
         score += 0.1
 
-    if has_conflict:
+    if schedule_risk:
         score += 0.2
 
     if len(failed_similar) > 0:
@@ -61,5 +79,10 @@ def calculate_risk_policy(
         "failed_similar_count": len(failed_similar),
         "has_rollback": has_rollback,
         "tested_rollback": tested_rollback,
-        "has_schedule_conflict": has_conflict,
+        "has_schedule_conflict": actual_schedule_conflict,
+        "historical_schedule_risk": historical_schedule_risk,
+        "schedule_conflict_frequency": round(
+            schedule_conflict_frequency,
+            3,
+        ),
     }

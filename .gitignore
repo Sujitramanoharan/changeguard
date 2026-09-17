@@ -10,3 +10,5 @@ changeguard.db
 # Frontend
 web/node_modules/
 frontend_dist/
+
+*.whl

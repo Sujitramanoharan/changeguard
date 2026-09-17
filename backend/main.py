@@ -6,12 +6,12 @@ import sys
 from pathlib import Path
 from typing import Literal
 
-# Let this file import from src/
 sys.path.append(str(Path(__file__).parent.parent / "src"))
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -19,18 +19,21 @@ from agent_graph import assess_change_autonomous
 from agent import assess_change
 from config import CORS_ORIGINS, APP_VERSION
 
+from backend.auth import (
+    create_access_token,
+    decode_access_token,
+    verify_password,
+)
+
 from backend.database import (
     init_db,
     save_assessment,
     get_all_assessments,
     get_stats,
     get_assessment_by_id,
+    get_user_by_username,
 )
 
-
-# =========================================================
-# LOGGING
-# =========================================================
 
 logging.basicConfig(
     level=logging.INFO,
@@ -40,18 +43,11 @@ logging.basicConfig(
 logger = logging.getLogger("changeguard")
 
 
-# =========================================================
-# APPLICATION
-# =========================================================
-
 app = FastAPI(
-    title="ChangeGuard - AI Enterprise Change Risk Assessment"
+    title="ChangeGuard - AI Enterprise Change Risk Assessment",
+    version=APP_VERSION,
 )
 
-
-# =========================================================
-# ERROR HANDLING
-# =========================================================
 
 @app.exception_handler(Exception)
 async def global_exception_handler(
@@ -72,38 +68,185 @@ async def global_exception_handler(
     }
 
 
-# =========================================================
-# CORS
-# =========================================================
-
-# Allowed frontend origins are configured through CORS_ORIGINS.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=CORS_ORIGINS,
     allow_credentials=True,
     allow_methods=["GET", "POST"],
-    allow_headers=["Content-Type"],
+    allow_headers=[
+        "Content-Type",
+        "Authorization",
+    ],
 )
 
-
-# =========================================================
-# DATABASE INITIALIZATION
-# =========================================================
 
 init_db()
 
 
-# =========================================================
-# FRONTEND PATHS
-# =========================================================
-
-DIST_DIR = Path(__file__).parent.parent / "frontend_dist"
-FRONTEND_DIR = Path(__file__).parent.parent / "frontend"
+security = HTTPBearer(
+    auto_error=False,
+)
 
 
-# =========================================================
-# REQUEST MODEL
-# =========================================================
+def get_current_user(
+    credentials: HTTPAuthorizationCredentials | None = Depends(security),
+):
+    """Validate JWT access token and return the authenticated user."""
+
+    if credentials is None:
+        raise HTTPException(
+            status_code=401,
+            detail="Authentication required",
+            headers={
+                "WWW-Authenticate": "Bearer",
+            },
+        )
+
+    if credentials.scheme.lower() != "bearer":
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid authentication scheme",
+            headers={
+                "WWW-Authenticate": "Bearer",
+            },
+        )
+
+    token = credentials.credentials
+
+    try:
+        payload = decode_access_token(token)
+
+    except Exception:
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid or expired access token",
+            headers={
+                "WWW-Authenticate": "Bearer",
+            },
+        )
+
+    username = payload.get("sub")
+    role = payload.get("role")
+
+    if not username or not role:
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid access token",
+            headers={
+                "WWW-Authenticate": "Bearer",
+            },
+        )
+
+    user = get_user_by_username(username)
+
+    if not user:
+        raise HTTPException(
+            status_code=401,
+            detail="User account not found",
+            headers={
+                "WWW-Authenticate": "Bearer",
+            },
+        )
+
+    return {
+        "id": user["id"],
+        "username": user["username"],
+        "role": user["role"],
+    }
+
+
+def require_admin(
+    current_user: dict = Depends(get_current_user),
+):
+    """Require an authenticated administrator."""
+
+    if current_user["role"] != "admin":
+        raise HTTPException(
+            status_code=403,
+            detail="Administrator access required",
+        )
+
+    return current_user
+
+
+class LoginRequest(BaseModel):
+    """Login credentials."""
+
+    username: str = Field(
+        min_length=1,
+        max_length=100,
+    )
+
+    password: str = Field(
+        min_length=1,
+        max_length=200,
+    )
+
+
+@app.post("/api/auth/login")
+def login(req: LoginRequest):
+    """Authenticate a user and return a JWT access token."""
+
+    user = get_user_by_username(
+        req.username
+    )
+
+    if not user:
+        logger.warning(
+            "Failed login attempt | username=%s | reason=user_not_found",
+            req.username,
+        )
+
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid username or password",
+        )
+
+    if not verify_password(
+        req.password,
+        user["password_hash"],
+    ):
+        logger.warning(
+            "Failed login attempt | username=%s | reason=invalid_password",
+            req.username,
+        )
+
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid username or password",
+        )
+
+    token = create_access_token(
+        username=user["username"],
+        role=user["role"],
+    )
+
+    logger.info(
+        "Successful login | username=%s | role=%s",
+        user["username"],
+        user["role"],
+    )
+
+    return {
+        "access_token": token,
+        "token_type": "bearer",
+        "expires_in_minutes": 60,
+        "user": {
+            "id": user["id"],
+            "username": user["username"],
+            "role": user["role"],
+        },
+    }
+
+
+@app.get("/api/auth/me")
+def current_user(
+    current_user: dict = Depends(get_current_user),
+):
+    """Return the currently authenticated user."""
+
+    return current_user
+
 
 class ChangeRequest(BaseModel):
     """Validated change request received from the frontend."""
@@ -162,20 +305,8 @@ class ChangeRequest(BaseModel):
     )
 
 
-# =========================================================
-# ASSESSMENT PARSER
-# =========================================================
-
 def parse_assessment(text: str):
-    """
-    Extract recommendation, risk level, and justification
-    from an assessment text.
-
-    The recommendation and risk level are NOT authoritative.
-    The deterministic risk policy is authoritative.
-    This parser is retained primarily for extracting the
-    generated justification.
-    """
+    """Extract generated recommendation, risk level and justification."""
 
     rec = re.search(
         r"RECOMMENDATION:\s*(\w+)",
@@ -200,49 +331,46 @@ def parse_assessment(text: str):
     )
 
 
-# =========================================================
-# CONTROLLED ASSESSMENT
-# =========================================================
-
 @app.post("/api/assess")
-def assess(req: ChangeRequest):
-    """
-    Run the controlled ChangeGuard assessment pipeline.
-
-    The deterministic risk policy is the authoritative source
-    for recommendation and risk level.
-    """
+def assess(
+    req: ChangeRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    """Run the controlled ChangeGuard assessment pipeline."""
 
     change = req.model_dump()
 
     logger.info(
-        "Starting controlled assessment | system=%s | change_type=%s",
+        "Starting controlled assessment | user=%s | system=%s | change_type=%s",
+        current_user["username"],
         change["system"],
         change["change_type"],
     )
 
     result = assess_change(change)
 
-    # The deterministic policy is authoritative.
     policy = result["policy"]
 
     rec = policy["recommendation"]
     lvl = policy["risk_level"]
 
     logger.info(
-        "Controlled assessment decision | recommendation=%s | risk_level=%s",
+        "Controlled assessment decision | user=%s | recommendation=%s | risk_level=%s",
+        current_user["username"],
         rec,
         lvl,
     )
 
-    # Extract only the generated justification text.
     _, _, jus = parse_assessment(
         result["assessment"]
     )
 
-    # Store complete evidence and assessment details.
     details = {
         "mode": "controlled",
+        "user": {
+            "username": current_user["username"],
+            "role": current_user["role"],
+        },
         "change": change,
         "ml_prediction": result["ml_prediction"],
         "similar_changes": result["similar_changes"],
@@ -256,7 +384,6 @@ def assess(req: ChangeRequest):
         "justification": jus,
     }
 
-    # Save assessment to database.
     new_id = save_assessment(
         change,
         result["ml_prediction"],
@@ -267,11 +394,11 @@ def assess(req: ChangeRequest):
     )
 
     logger.info(
-        "Controlled assessment saved | assessment_id=%s",
+        "Controlled assessment saved | assessment_id=%s | user=%s",
         new_id,
+        current_user["username"],
     )
 
-    # Return result to frontend.
     return {
         "id": new_id,
         "ml_prediction": result["ml_prediction"],
@@ -283,57 +410,49 @@ def assess(req: ChangeRequest):
     }
 
 
-# =========================================================
-# AUTONOMOUS ASSESSMENT
-# =========================================================
-
 @app.post("/api/assess-autonomous")
-def assess_autonomous(req: ChangeRequest):
-    """
-    Run the autonomous LangGraph ChangeGuard assessment.
+def assess_autonomous(
+    req: ChangeRequest,
+    current_user: dict = Depends(require_admin),
+):
+    """Run the autonomous LangGraph ChangeGuard assessment."""
 
-    The deterministic risk policy remains authoritative even
-    when the autonomous agent chooses which evidence tools to use.
-    """
-
-    # Convert validated request into a dictionary.
     change = req.model_dump()
 
     logger.info(
-        "Starting autonomous assessment | system=%s | change_type=%s",
+        "Starting autonomous assessment | user=%s | system=%s | change_type=%s",
+        current_user["username"],
         change["system"],
         change["change_type"],
     )
 
-    # Run autonomous LangGraph agent.
     result = assess_change_autonomous(change)
 
-    # The autonomous pipeline already calculates the
-    # authoritative deterministic policy.
     policy = result["policy"]
 
     rec = policy["recommendation"]
     lvl = policy["risk_level"]
 
     logger.info(
-        "Autonomous assessment decision | recommendation=%s | risk_level=%s | tool_calls=%s",
+        "Autonomous assessment decision | user=%s | recommendation=%s | risk_level=%s | tool_calls=%s",
+        current_user["username"],
         rec,
         lvl,
         result["num_tool_calls"],
     )
 
-    # Extract only the generated justification.
     _, _, jus = parse_assessment(
         result["final_answer"]
     )
 
-    # Use the ML prediction already produced by the
-    # autonomous pipeline instead of running the model twice.
     ml_prediction = result["ml_prediction"]
 
-    # Store complete autonomous assessment details.
     details = {
         "mode": "autonomous",
+        "user": {
+            "username": current_user["username"],
+            "role": current_user["role"],
+        },
         "change": change,
         "ml_prediction": ml_prediction,
         "historical_context": result.get(
@@ -353,7 +472,6 @@ def assess_autonomous(req: ChangeRequest):
         "num_tool_calls": result["num_tool_calls"],
     }
 
-    # Save assessment to database.
     new_id = save_assessment(
         change,
         ml_prediction,
@@ -364,11 +482,11 @@ def assess_autonomous(req: ChangeRequest):
     )
 
     logger.info(
-        "Autonomous assessment saved | assessment_id=%s",
+        "Autonomous assessment saved | assessment_id=%s | user=%s",
         new_id,
+        current_user["username"],
     )
 
-    # Return result to frontend.
     return {
         "id": new_id,
         "ml_prediction": ml_prediction,
@@ -380,23 +498,20 @@ def assess_autonomous(req: ChangeRequest):
     }
 
 
-# =========================================================
-# HISTORY
-# =========================================================
-
 @app.get("/api/history")
-def history():
+def history(
+    current_user: dict = Depends(get_current_user),
+):
     """Return all saved assessments."""
 
     return get_all_assessments()
 
 
-# =========================================================
-# SINGLE ASSESSMENT
-# =========================================================
-
 @app.get("/api/assessments/{assessment_id}")
-def get_assessment(assessment_id: int):
+def get_assessment(
+    assessment_id: int,
+    current_user: dict = Depends(get_current_user),
+):
     """Return one assessment by ID."""
 
     data = get_assessment_by_id(
@@ -412,20 +527,14 @@ def get_assessment(assessment_id: int):
     return data
 
 
-# =========================================================
-# STATISTICS
-# =========================================================
-
 @app.get("/api/stats")
-def stats():
+def stats(
+    current_user: dict = Depends(get_current_user),
+):
     """Return assessment statistics."""
 
     return get_stats()
 
-
-# =========================================================
-# HEALTH CHECK
-# =========================================================
 
 @app.get("/health")
 def health():
@@ -438,9 +547,9 @@ def health():
     }
 
 
-# =========================================================
-# STATIC FILES & SPA ROUTING
-# =========================================================
+DIST_DIR = Path(__file__).parent.parent / "frontend_dist"
+FRONTEND_DIR = Path(__file__).parent.parent / "frontend"
+
 
 if DIST_DIR.exists():
     app.mount(
@@ -469,8 +578,6 @@ def serve_spa(full_path: str):
             DIST_DIR / "index.html"
         )
 
-    # Fallback to the vanilla frontend if the
-    # production frontend has not been built.
     target = FRONTEND_DIR / full_path
 
     if target.is_file():
