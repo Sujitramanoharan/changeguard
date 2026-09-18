@@ -8,13 +8,16 @@ services:
     container_name: changeguard-app
     restart: unless-stopped
     ports:
-      - "8000:8000"
+      - "8000:7860"
     environment:
       - GROQ_API_KEY=${GROQ_API_KEY}
+      - CHANGEGUARD_JWT_SECRET=${CHANGEGUARD_JWT_SECRET}
+      - CHANGEGUARD_DB_PATH=/app/data/changeguard.db
+      - CORS_ORIGINS=${CORS_ORIGINS:-http://localhost:8000}
     volumes:
       - changeguard-data:/app/data
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:7860/health"]
       interval: 30s
       timeout: 5s
       retries: 3

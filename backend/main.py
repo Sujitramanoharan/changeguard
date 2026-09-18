@@ -548,7 +548,6 @@ def health():
 
 
 DIST_DIR = Path(__file__).parent.parent / "frontend_dist"
-FRONTEND_DIR = Path(__file__).parent.parent / "frontend"
 
 
 if DIST_DIR.exists():
@@ -566,23 +565,22 @@ if DIST_DIR.exists():
     methods=["GET", "HEAD"],
 )
 def serve_spa(full_path: str):
-    """Serve the React frontend or fallback frontend."""
+    """Serve the built React single-page application."""
 
-    if DIST_DIR.exists():
-        target = DIST_DIR / full_path
-
-        if target.is_file():
-            return FileResponse(target)
-
-        return FileResponse(
-            DIST_DIR / "index.html"
+    if not DIST_DIR.exists():
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Frontend build not found. Run `npm run build` "
+                "in web/ or build the Docker image."
+            ),
         )
 
-    target = FRONTEND_DIR / full_path
+    target = DIST_DIR / full_path
 
     if target.is_file():
         return FileResponse(target)
 
     return FileResponse(
-        FRONTEND_DIR / "index.html"
+        DIST_DIR / "index.html"
     )

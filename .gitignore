@@ -3,10 +3,10 @@ venv/
 __pycache__/
 *.pyc
 .vscode/
-models/
 .DS_Store
 *.db
 changeguard.db
+.pytest_cache/
 # Frontend
 web/node_modules/
 frontend_dist/
