@@ -103,6 +103,17 @@ GROQ_API_KEY=...
 CHANGEGUARD_JWT_SECRET=...
 ```
 
+## Seeding demo data
+
+```bash
+python scripts/seed_demo_data.py
+```
+
+Runs 20 varied change scenarios through the real assessment pipeline (not
+fabricated data) and backdates their timestamps to look like organic CAB
+activity. Useful for demos, and for restoring a clean history after a
+restart on any deployment with ephemeral storage.
+
 ## Regenerating the model artifacts
 
 The dataset, trained model, and FAISS index are already committed under

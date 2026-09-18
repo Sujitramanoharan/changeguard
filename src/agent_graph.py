@@ -560,7 +560,7 @@ Do not create a different risk level.
 
                     llm_justification = (
                         llm_justification[
-                            len("JUSTIFICATION:")
+                            len("JUSTIFICATION:"):
                         ].strip()
                     )
 

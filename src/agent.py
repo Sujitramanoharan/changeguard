@@ -264,7 +264,7 @@ JUSTIFICATION: <2-4 sentences using only facts supported by the evidence above.>
             # Remove only that prefix and preserve the explanation.
             if llm_justification.upper().startswith("JUSTIFICATION:"):
                 llm_justification = llm_justification[
-                    len("JUSTIFICATION:")
+                    len("JUSTIFICATION:"):
                 ].strip()
 
             # Safety check: if the LLM returns no usable explanation,
