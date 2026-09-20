@@ -55,5 +55,8 @@ EXPOSE 7860
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD curl -f http://localhost:7860/health || exit 1
 
-# Start production server
-CMD ["uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "7860", "--workers", "2"]
+# Start production server.
+# A single worker on purpose: each worker independently loads the full
+# ML model, FAISS index, and embedding model into memory, which does
+# not fit in the 512MB RAM of small/free hosting tiers with more than one.
+CMD ["uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "7860", "--workers", "1"]
