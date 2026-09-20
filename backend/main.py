@@ -566,6 +566,35 @@ def stats(
     return get_stats()
 
 
+@app.post("/api/admin/seed-demo-data")
+def seed_demo_data(
+    current_user: dict = Depends(require_admin),
+):
+    """Replace all assessments with a realistic demo history.
+
+    Runs real scenarios through the actual pipeline (not fabricated
+    data). Intended for hosts with no shell access and ephemeral
+    storage, where the audit database can reset unexpectedly.
+    """
+
+    from demo_data import seed_demo_assessments
+
+    logger.info(
+        "Seeding demo data | user=%s",
+        current_user["username"],
+    )
+
+    count = seed_demo_assessments()
+
+    logger.info(
+        "Demo data seeded | user=%s | count=%s",
+        current_user["username"],
+        count,
+    )
+
+    return {"seeded": count}
+
+
 @app.get("/health")
 def health():
     """Basic application health check."""
