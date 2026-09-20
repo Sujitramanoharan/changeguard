@@ -1,6 +1,7 @@
 """ChangeGuard FastAPI backend."""
 
 import logging
+import os
 import re
 import sys
 from pathlib import Path
@@ -27,6 +28,7 @@ from backend.auth import (
 
 from backend.database import (
     init_db,
+    create_user,
     save_assessment,
     get_all_assessments,
     get_stats,
@@ -81,6 +83,34 @@ app.add_middleware(
 
 
 init_db()
+
+
+def bootstrap_admin_from_env():
+    """Create the first admin user from env vars if none exists yet.
+
+    Lets a fresh deployment (no shell/exec access on most free hosting
+    tiers) get a usable login without a manual provisioning step.
+    No-op if the vars are unset or the username already exists.
+    """
+
+    username = os.getenv("ADMIN_USERNAME")
+    password = os.getenv("ADMIN_PASSWORD")
+
+    if not username or not password:
+        return
+
+    if get_user_by_username(username):
+        return
+
+    create_user(username=username, password=password, role="admin")
+
+    logger.info(
+        "Bootstrapped admin user '%s' from ADMIN_USERNAME/ADMIN_PASSWORD",
+        username,
+    )
+
+
+bootstrap_admin_from_env()
 
 
 security = HTTPBearer(
