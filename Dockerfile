@@ -31,15 +31,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Copy Python requirements
 COPY requirements.txt .
 
-# Copy the Linux CPU-only PyTorch wheel downloaded on the host.
-# This avoids downloading CUDA-enabled PyTorch and avoids
-# the Docker certificate-chain problem with download.pytorch.org.
-COPY torch-2.14.0+cpu-cp311-cp311-manylinux_2_28_x86_64.whl .
-
-# Install CPU-only PyTorch
+# Install CPU-only PyTorch from the official CPU wheel index.
+# Avoids pulling the much larger CUDA-enabled build from PyPI.
 RUN pip install --no-cache-dir \
-    ./torch-2.14.0+cpu-cp311-cp311-manylinux_2_28_x86_64.whl \
-    && rm torch-2.14.0+cpu-cp311-cp311-manylinux_2_28_x86_64.whl
+    torch==2.14.0 \
+    --index-url https://download.pytorch.org/whl/cpu
 
 # Install remaining Python dependencies without reinstalling PyTorch
 RUN sed '/^torch==/d' requirements.txt > requirements-docker.txt \
