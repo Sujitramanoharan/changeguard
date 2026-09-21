@@ -1,5 +1,7 @@
 # ChangeGuard
 
+[![CI](https://github.com/Sujitramanoharan/changeguard/actions/workflows/ci.yml/badge.svg)](https://github.com/Sujitramanoharan/changeguard/actions/workflows/ci.yml)
+
 AI-assisted change risk assessment for enterprise change advisory boards (CAB).
 Given a proposed infrastructure/deployment change, ChangeGuard combines a
 calibrated ML model, retrieval over historical changes, and deterministic
