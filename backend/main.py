@@ -9,7 +9,7 @@ from typing import Literal
 
 sys.path.append(str(Path(__file__).parent.parent / "src"))
 
-from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -19,6 +19,7 @@ from pydantic import BaseModel, Field
 from agent_graph import assess_change_autonomous
 from agent import assess_change
 from config import CORS_ORIGINS, APP_VERSION
+from document_verification import verify_rollback_document
 
 from backend.auth import (
     create_access_token,
@@ -334,6 +335,10 @@ class ChangeRequest(BaseModel):
         max_length=2000,
     )
 
+    rollback_document_provided: bool = False
+
+    rollback_document_verified: bool = False
+
 
 def parse_assessment(text: str):
     """Extract generated recommendation, risk level and justification."""
@@ -359,6 +364,83 @@ def parse_assessment(text: str):
         lvl.group(1) if lvl else "Medium",
         jus.group(1).strip() if jus else text,
     )
+
+
+MAX_DOCUMENT_BYTES = 5 * 1024 * 1024  # 5MB
+
+
+def extract_document_text(
+    filename: str,
+    data: bytes,
+) -> str:
+    """Extract plain text from an uploaded .txt, .md, or .pdf document."""
+
+    if filename.lower().endswith(".pdf"):
+        from io import BytesIO
+
+        from pypdf import PdfReader
+
+        reader = PdfReader(BytesIO(data))
+
+        return "\n".join(
+            page.extract_text() or ""
+            for page in reader.pages
+        )
+
+    return data.decode("utf-8", errors="ignore")
+
+
+@app.post("/api/documents/verify-rollback")
+def verify_rollback_document_upload(
+    file: UploadFile = File(...),
+    current_user: dict = Depends(get_current_user),
+):
+    """Verify an uploaded rollback plan document is a real procedure.
+
+    Deterministic heuristic (src/document_verification.py) - not an
+    LLM judgment call - so this stays consistent with the rest of the
+    evidence-gathering layer: the LLM never decides anything, it only
+    ever explains a result that's already been computed.
+    """
+
+    if not file.filename or not file.filename.lower().endswith(
+        (".txt", ".md", ".pdf")
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="Only .txt, .md, or .pdf files are supported.",
+        )
+
+    data = file.file.read()
+
+    if len(data) > MAX_DOCUMENT_BYTES:
+        raise HTTPException(
+            status_code=400,
+            detail="Document is too large (max 5MB).",
+        )
+
+    try:
+        text = extract_document_text(file.filename, data)
+
+    except Exception:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Could not read this document. Try a .txt, .md, "
+                "or .pdf file."
+            ),
+        )
+
+    result = verify_rollback_document(text)
+
+    logger.info(
+        "Rollback document verified | user=%s | filename=%s | verified=%s",
+        current_user["username"],
+        file.filename,
+        result["verified"],
+    )
+
+    return result
 
 
 @app.post("/api/assess")

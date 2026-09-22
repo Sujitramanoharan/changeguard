@@ -141,7 +141,7 @@ Justification: ${item.justification}`;
           )}
 
           {/* Evidence Details Grid */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
             <div className="bg-white p-4 rounded-xl border border-slate-200/80 shadow-xs">
               <div className="flex items-center gap-2 text-xs font-semibold text-slate-500 mb-1">
                 <Server className="w-4 h-4 text-indigo-600" />
@@ -165,6 +165,16 @@ Justification: ${item.justification}`;
               </div>
               <p className="text-xs text-slate-700 mt-1">{evidence.rollback?.note || `Plan exists: ${item.rollback_plan_exists}`}</p>
             </div>
+
+            {evidence.document && (
+              <div className="bg-white p-4 rounded-xl border border-slate-200/80 shadow-xs">
+                <div className="flex items-center gap-2 text-xs font-semibold text-slate-500 mb-1">
+                  <FileText className="w-4 h-4 text-purple-600" />
+                  Document Verification
+                </div>
+                <p className="text-xs text-slate-700 mt-1">{evidence.document.note}</p>
+              </div>
+            )}
           </div>
 
           {/* Change Payload Spec */}

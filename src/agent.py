@@ -33,6 +33,39 @@ from context import derive_change_context
 from risk_policy import calculate_risk_policy
 
 
+def describe_document_evidence(change: dict) -> dict:
+    """Summarize whether an uploaded rollback document backs up the claim."""
+
+    provided = bool(change.get("rollback_document_provided"))
+    verified = bool(change.get("rollback_document_verified"))
+    claims_rollback = change.get("rollback_plan_exists") == "Yes"
+
+    if provided and verified:
+        note = (
+            "A rollback plan document was uploaded and verified - it "
+            "contains a real, numbered rollback procedure."
+        )
+    elif provided and not verified:
+        note = (
+            "CRITICAL: A rollback plan document was uploaded but does "
+            "not substantiate a real rollback procedure - the claimed "
+            "rollback plan is not backed by evidence."
+        )
+    elif claims_rollback:
+        note = (
+            "No supporting document was uploaded - the rollback plan "
+            "is self-attested only."
+        )
+    else:
+        note = "No rollback document evidence submitted."
+
+    return {
+        "provided": provided,
+        "verified": verified,
+        "note": note,
+    }
+
+
 def generate_fallback_assessment(
     change,
     ml,
@@ -90,6 +123,12 @@ def generate_fallback_assessment(
         justification_parts.append(
             f"Scheduled during {change.get('requested_window', 'peak window')} "
             f"which carries higher incident correlation."
+        )
+
+    if policy.get("evidence_mismatch"):
+        justification_parts.append(
+            "CRITICAL: A rollback plan document was uploaded but does "
+            "not substantiate a real rollback procedure."
         )
 
     justification = " ".join(justification_parts)
@@ -159,6 +198,8 @@ def assess_change(change: dict) -> dict:
         change.get("rollback_plan_tested", "None"),
     )
 
+    document = describe_document_evidence(change)
+
     # ---------------------------------------------------------
     # 5. Build evidence summary
     # ---------------------------------------------------------
@@ -202,6 +243,9 @@ EVIDENCE GATHERED:
 
 5. ROLLBACK SAFETY:
    {rollback['note']}
+
+6. ROLLBACK DOCUMENT VERIFICATION:
+   {document['note']}
 """
 
     # ---------------------------------------------------------
@@ -311,6 +355,7 @@ JUSTIFICATION: <2-4 sentences using only facts supported by the evidence above.>
             "incidents": incidents,
             "schedule": schedule,
             "rollback": rollback,
+            "document": document,
         },
         "policy": policy,
         "assessment": assessment_text,

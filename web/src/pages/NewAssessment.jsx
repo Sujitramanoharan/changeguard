@@ -9,6 +9,9 @@ import {
   Play,
   CheckCircle2,
   Zap,
+  Upload,
+  FileText,
+  XCircle,
 } from "lucide-react";
 
 const SYSTEMS = [
@@ -114,6 +117,11 @@ export default function NewAssessment() {
   const [currentStepIndex, setCurrentStepIndex] = useState(0);
   const [fullModalItem, setFullModalItem] = useState(null);
 
+  const [docName, setDocName] = useState(null);
+  const [docChecking, setDocChecking] = useState(false);
+  const [docResult, setDocResult] = useState(null);
+  const [docError, setDocError] = useState(null);
+
   function update(key, value) {
     setForm((f) => ({
       ...f,
@@ -125,6 +133,56 @@ export default function NewAssessment() {
     setForm(PRESETS[presetKey]);
     setResult(null);
     setError(null);
+    setDocName(null);
+    setDocResult(null);
+    setDocError(null);
+  }
+
+  async function handleDocumentUpload(e) {
+    const file = e.target.files?.[0];
+
+    if (!file) {
+      return;
+    }
+
+    setDocName(file.name);
+    setDocChecking(true);
+    setDocResult(null);
+    setDocError(null);
+
+    try {
+      const verification = await api.verifyRollbackDocument(file);
+
+      setDocResult(verification);
+
+      setForm((f) => ({
+        ...f,
+        rollback_document_provided: true,
+        rollback_document_verified: verification.verified,
+      }));
+    } catch (err) {
+      setDocError(err?.message || "Could not verify this document.");
+
+      setForm((f) => ({
+        ...f,
+        rollback_document_provided: true,
+        rollback_document_verified: false,
+      }));
+    } finally {
+      setDocChecking(false);
+    }
+  }
+
+  function clearDocument() {
+    setDocName(null);
+    setDocResult(null);
+    setDocError(null);
+
+    setForm((f) => ({
+      ...f,
+      rollback_document_provided: false,
+      rollback_document_verified: false,
+    }));
   }
 
   function handleModeChange(nextMode) {
@@ -422,6 +480,87 @@ export default function NewAssessment() {
             </Field>
           </div>
 
+          {/* Rollback Document Upload */}
+          <Field label="Rollback Plan Document (optional)">
+            <p className="text-xs text-slate-500 mb-2 -mt-0.5">
+              Upload the actual rollback runbook. It's checked for a
+              real, numbered procedure — a claimed rollback plan that
+              isn't backed by a real document raises the risk score.
+            </p>
+
+            {!docName ? (
+              <label className="flex items-center justify-center gap-2 w-full px-4 py-3 border-2 border-dashed border-slate-300 rounded-xl text-sm text-slate-500 hover:border-indigo-400 hover:text-indigo-600 hover:bg-indigo-50/40 transition-colors cursor-pointer">
+                <Upload className="w-4 h-4" />
+                Choose a .txt, .md, or .pdf file
+                <input
+                  type="file"
+                  accept=".txt,.md,.pdf"
+                  className="hidden"
+                  onChange={handleDocumentUpload}
+                />
+              </label>
+            ) : (
+              <div
+                className={`flex items-center justify-between gap-3 px-4 py-3 rounded-xl border text-sm ${
+                  docChecking
+                    ? "bg-slate-50 border-slate-200 text-slate-500"
+                    : docResult?.verified
+                    ? "bg-emerald-50 border-emerald-200 text-emerald-800"
+                    : "bg-rose-50 border-rose-200 text-rose-800"
+                }`}
+              >
+                <div className="flex items-center gap-2 min-w-0">
+                  <FileText className="w-4 h-4 flex-shrink-0" />
+                  <span className="truncate font-medium">{docName}</span>
+                </div>
+
+                <div className="flex items-center gap-3 flex-shrink-0">
+                  {docChecking && (
+                    <span className="text-xs">Verifying…</span>
+                  )}
+
+                  {!docChecking && docResult && (
+                    <span className="text-xs font-semibold flex items-center gap-1">
+                      {docResult.verified ? (
+                        <>
+                          <CheckCircle2 className="w-3.5 h-3.5" />
+                          Verified
+                        </>
+                      ) : (
+                        <>
+                          <XCircle className="w-3.5 h-3.5" />
+                          Not substantiated
+                        </>
+                      )}
+                    </span>
+                  )}
+
+                  {!docChecking && docError && (
+                    <span className="text-xs font-semibold">
+                      {docError}
+                    </span>
+                  )}
+
+                  <button
+                    type="button"
+                    onClick={clearDocument}
+                    className="text-xs underline text-slate-400 hover:text-slate-700"
+                  >
+                    Remove
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {!docChecking && docResult && docResult.reasons?.length > 0 && (
+              <ul className="mt-2 text-xs text-slate-500 list-disc list-inside space-y-0.5">
+                {docResult.reasons.map((r, idx) => (
+                  <li key={idx}>{r}</li>
+                ))}
+              </ul>
+            )}
+          </Field>
+
           {/* Description */}
           <Field label="Change Description & Technical Scope">
             <textarea
@@ -696,11 +835,12 @@ export default function NewAssessment() {
                 Gathered Tool Evidence Summary
               </h4>
 
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
                 {[
                   result.evidence.incidents?.note,
                   result.evidence.schedule?.note,
                   result.evidence.rollback?.note,
+                  result.evidence.document?.note,
                 ]
                   .filter(Boolean)
                   .map((note, idx) => (

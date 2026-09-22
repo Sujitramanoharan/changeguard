@@ -18,6 +18,11 @@ with a grounded, human-readable justification.
    (`src/retrieval.py`, `src/build_index.py`).
 3. **Evidence tools** — deterministic lookups for incident history, schedule
    conflicts, and rollback safety (`src/tools.py`).
+   Optionally, a rollback plan document (`.txt`/`.md`/`.pdf`) can be uploaded
+   and is checked for a real, numbered procedure
+   (`src/document_verification.py`) — a claimed rollback plan that isn't
+   backed by a credible document raises the risk score instead of being
+   trusted at face value.
 4. **Risk policy** — the ML probability and evidence signals are combined by
    a deterministic, auditable policy (`src/risk_policy.py`) that produces the
    final recommendation and risk level. The LLM never decides the outcome —

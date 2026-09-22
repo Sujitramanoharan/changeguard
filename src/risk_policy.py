@@ -26,6 +26,22 @@ def calculate_risk_policy(
     has_rollback = change.get("rollback_plan_exists") == "Yes"
     tested_rollback = change.get("rollback_plan_tested") == "Yes"
 
+    # A rollback plan document was uploaded, but the deterministic
+    # verification heuristic (src/document_verification.py) found it
+    # does not actually substantiate a real rollback procedure - the
+    # claim and the evidence disagree.
+    rollback_doc_provided = bool(
+        change.get("rollback_document_provided")
+    )
+    rollback_doc_verified = bool(
+        change.get("rollback_document_verified")
+    )
+    evidence_mismatch = (
+        has_rollback
+        and rollback_doc_provided
+        and not rollback_doc_verified
+    )
+
     # Actual conflict reported for this specific change.
     actual_schedule_conflict = (
         change.get("schedule_conflict") == "Yes"
@@ -62,6 +78,9 @@ def calculate_risk_policy(
     if len(failed_similar) > 0:
         score += 0.15
 
+    if evidence_mismatch:
+        score += 0.2
+
     if score >= 0.55:
         recommendation = "REJECT"
         risk_level = "High"
@@ -85,4 +104,7 @@ def calculate_risk_policy(
             schedule_conflict_frequency,
             3,
         ),
+        "rollback_document_provided": rollback_doc_provided,
+        "rollback_document_verified": rollback_doc_verified,
+        "evidence_mismatch": evidence_mismatch,
     }

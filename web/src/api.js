@@ -70,6 +70,19 @@ async function post(path, body) {
   return handleResponse(res);
 }
 
+async function postFile(path, file) {
+  const formData = new FormData();
+  formData.append("file", file);
+
+  const res = await fetch(BASE + path, {
+    method: "POST",
+    headers: getHeaders(false),
+    body: formData,
+  });
+
+  return handleResponse(res);
+}
+
 async function get(path) {
   const res = await fetch(BASE + path, {
     method: "GET",
@@ -151,6 +164,8 @@ export const api = {
   me: () => get("/auth/me"),
   assess: (change) => post("/assess", change),
   assessAutonomous: (change) => post("/assess-autonomous", change),
+  verifyRollbackDocument: (file) =>
+    postFile("/documents/verify-rollback", file),
   history: () => get("/history"),
   getAssessment: (id) => get(`/assessments/${id}`),
   stats: () => get("/stats"),

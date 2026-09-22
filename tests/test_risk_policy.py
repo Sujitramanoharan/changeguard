@@ -104,6 +104,62 @@ def test_failed_similar_changes_add_risk():
     assert result["score"] > 0.1 * 0.4
 
 
+def test_unverified_rollback_document_adds_risk():
+    baseline = calculate_risk_policy(
+        ml={"risk_probability": 0.1},
+        change=make_change(),
+        similar=[],
+        schedule={"conflict_frequency": 0.0},
+    )
+
+    mismatch = calculate_risk_policy(
+        ml={"risk_probability": 0.1},
+        change=make_change(
+            rollback_document_provided=True,
+            rollback_document_verified=False,
+        ),
+        similar=[],
+        schedule={"conflict_frequency": 0.0},
+    )
+
+    assert mismatch["evidence_mismatch"] is True
+    assert mismatch["score"] > baseline["score"]
+
+
+def test_verified_rollback_document_does_not_add_risk():
+    baseline = calculate_risk_policy(
+        ml={"risk_probability": 0.1},
+        change=make_change(),
+        similar=[],
+        schedule={"conflict_frequency": 0.0},
+    )
+
+    verified = calculate_risk_policy(
+        ml={"risk_probability": 0.1},
+        change=make_change(
+            rollback_document_provided=True,
+            rollback_document_verified=True,
+        ),
+        similar=[],
+        schedule={"conflict_frequency": 0.0},
+    )
+
+    assert verified["evidence_mismatch"] is False
+    assert verified["score"] == baseline["score"]
+
+
+def test_no_document_uploaded_is_not_a_mismatch():
+    result = calculate_risk_policy(
+        ml={"risk_probability": 0.1},
+        change=make_change(),
+        similar=[],
+        schedule={"conflict_frequency": 0.0},
+    )
+
+    assert result["evidence_mismatch"] is False
+    assert result["rollback_document_provided"] is False
+
+
 def test_high_probability_missing_rollback_and_conflict_is_rejected():
     result = calculate_risk_policy(
         ml={"risk_probability": 0.9},
