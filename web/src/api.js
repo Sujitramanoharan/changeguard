@@ -166,6 +166,7 @@ export const api = {
   assessAutonomous: (change) => post("/assess-autonomous", change),
   verifyRollbackDocument: (file) =>
     postFile("/documents/verify-rollback", file),
+  analyzeRepoChange: (url) => post("/analyze-repo-change", { url }),
   history: () => get("/history"),
   getAssessment: (id) => get(`/assessments/${id}`),
   stats: () => get("/stats"),

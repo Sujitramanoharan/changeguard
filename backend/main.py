@@ -20,6 +20,7 @@ from agent_graph import assess_change_autonomous
 from agent import assess_change
 from config import CORS_ORIGINS, APP_VERSION
 from document_verification import verify_rollback_document
+from repo_change_analysis import RepoChangeError, analyze_github_url
 
 from backend.auth import (
     create_access_token,
@@ -438,6 +439,69 @@ def verify_rollback_document_upload(
         current_user["username"],
         file.filename,
         result["verified"],
+    )
+
+    return result
+
+
+class RepoChangeRequest(BaseModel):
+    """A GitHub commit or pull request URL to analyze."""
+
+    url: str = Field(
+        min_length=1,
+        max_length=500,
+    )
+
+
+@app.post("/api/analyze-repo-change")
+def analyze_repo_change(
+    req: RepoChangeRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    """Fetch a real GitHub commit/PR and derive assessment fields from it.
+
+    Deterministic heuristics over file paths, commit text, and diff
+    stats (src/repo_change_analysis.py) - not an AI judgment call. The
+    result pre-fills the same assessment form a human would fill in by
+    hand; nothing here skips review or runs the risk pipeline itself.
+    """
+
+    logger.info(
+        "Analyzing GitHub change | user=%s | url=%s",
+        current_user["username"],
+        req.url,
+    )
+
+    try:
+        result = analyze_github_url(req.url)
+
+    except RepoChangeError as err:
+        raise HTTPException(
+            status_code=400,
+            detail=str(err),
+        )
+
+    except Exception:
+        logger.exception(
+            "Failed to analyze GitHub change | url=%s",
+            req.url,
+        )
+
+        raise HTTPException(
+            status_code=502,
+            detail=(
+                "Could not reach GitHub or parse this change. "
+                "Check the URL and try again."
+            ),
+        )
+
+    logger.info(
+        "GitHub change analyzed | user=%s | repo=%s | change_type=%s | "
+        "change_size=%s",
+        current_user["username"],
+        result["system"],
+        result["change_type"],
+        result["change_size"],
     )
 
     return result

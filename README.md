@@ -32,6 +32,12 @@ with a grounded, human-readable justification.
 6. **Autonomous mode** — a LangGraph agent (`src/agent_graph.py`) can instead
    decide for itself which evidence tools to call, for comparison against the
    fixed pipeline. Restricted to admin users.
+7. **Real GitHub change analysis** — a public GitHub commit or pull request
+   link can be pasted in instead of hand-filling the form. ChangeGuard
+   fetches the real diff and derives change type, size, and rollback
+   signals from it (`src/repo_change_analysis.py`), then pre-fills the same
+   form for review before running the same pipeline above — nothing here
+   is a separate, unaudited path.
 
 ## Architecture
 
