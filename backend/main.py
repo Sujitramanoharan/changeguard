@@ -15,6 +15,9 @@ from fastapi.responses import FileResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.util import get_remote_address
 
 from agent_graph import assess_change_autonomous
 from agent import assess_change
@@ -51,6 +54,11 @@ app = FastAPI(
     title="ChangeGuard - AI Enterprise Change Risk Assessment",
     version=APP_VERSION,
 )
+
+
+limiter = Limiter(key_func=get_remote_address)
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 
 @app.exception_handler(Exception)
@@ -216,8 +224,13 @@ class LoginRequest(BaseModel):
 
 
 @app.post("/api/auth/login")
-def login(req: LoginRequest):
-    """Authenticate a user and return a JWT access token."""
+@limiter.limit("5/minute")
+def login(request: Request, req: LoginRequest):
+    """Authenticate a user and return a JWT access token.
+
+    Rate-limited per client IP to slow down credential-stuffing/brute
+    -force attempts against this endpoint specifically.
+    """
 
     user = get_user_by_username(
         req.username

@@ -44,8 +44,9 @@ with a grounded, human-readable justification.
 ```
 web/            React (Vite + Tailwind) SPA — dashboard, new assessment,
                 history, auth
-backend/        FastAPI app: JWT auth, role-based authorization, SQLite
-                audit trail, static file serving for the built SPA
+backend/        FastAPI app: JWT auth, role-based authorization, rate
+                limiting on login, SQLite audit trail, static file
+                serving for the built SPA
 src/            ML training, FAISS retrieval, evidence tools, risk policy,
                 LangGraph agent, shared config
 models/         Trained model artifacts + FAISS index + bundled embedding

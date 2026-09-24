@@ -107,11 +107,17 @@ async function login(username, password) {
   if (!res.ok) {
     let message = "Invalid username or password";
 
+    if (res.status === 429) {
+      message = "Too many login attempts. Please wait a minute and try again.";
+    }
+
     try {
       const data = await res.json();
 
       if (data?.detail) {
         message = data.detail;
+      } else if (data?.error && res.status === 429) {
+        message = "Too many login attempts. Please wait a minute and try again.";
       }
     } catch {
       // Keep the default login error.
