@@ -95,16 +95,20 @@ app.add_middleware(
 init_db()
 
 
-def bootstrap_admin_from_env():
-    """Create the first admin user from env vars if none exists yet.
+def bootstrap_user_from_env(
+    role: str,
+    username_var: str,
+    password_var: str,
+):
+    """Create a user with the given role from env vars if none exists yet.
 
     Lets a fresh deployment (no shell/exec access on most free hosting
-    tiers) get a usable login without a manual provisioning step.
+    tiers) get usable logins without a manual provisioning step.
     No-op if the vars are unset or the username already exists.
     """
 
-    username = os.getenv("ADMIN_USERNAME")
-    password = os.getenv("ADMIN_PASSWORD")
+    username = os.getenv(username_var)
+    password = os.getenv(password_var)
 
     if not username or not password:
         return
@@ -112,15 +116,19 @@ def bootstrap_admin_from_env():
     if get_user_by_username(username):
         return
 
-    create_user(username=username, password=password, role="admin")
+    create_user(username=username, password=password, role=role)
 
     logger.info(
-        "Bootstrapped admin user '%s' from ADMIN_USERNAME/ADMIN_PASSWORD",
+        "Bootstrapped %s user '%s' from %s/%s",
+        role,
         username,
+        username_var,
+        password_var,
     )
 
 
-bootstrap_admin_from_env()
+bootstrap_user_from_env("admin", "ADMIN_USERNAME", "ADMIN_PASSWORD")
+bootstrap_user_from_env("reviewer", "REVIEWER_USERNAME", "REVIEWER_PASSWORD")
 
 
 security = HTTPBearer(

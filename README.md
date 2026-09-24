@@ -118,9 +118,9 @@ CHANGEGUARD_JWT_SECRET=...
 ```
 
 On a host with no shell/exec access (e.g. a free-tier PaaS), also set
-`ADMIN_USERNAME` and `ADMIN_PASSWORD` to have the app create the first
-admin user automatically on startup, instead of running
-`create_admin.py` interactively.
+`ADMIN_USERNAME` and `ADMIN_PASSWORD` (and optionally `REVIEWER_USERNAME`
+/ `REVIEWER_PASSWORD`) to have the app create those users automatically
+on startup, instead of running `create_admin.py` interactively.
 
 ## Seeding demo data
 
