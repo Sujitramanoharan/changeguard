@@ -9,6 +9,7 @@ commit text, and diff stats - not an AI judgment call - consistent
 with the rest of the evidence-gathering layer.
 """
 
+import os
 import re
 
 import httpx
@@ -76,6 +77,41 @@ def parse_github_url(url: str) -> dict:
     )
 
 
+def _github_headers() -> dict:
+    """Build GitHub API request headers, authenticated if a token is set.
+
+    Unauthenticated requests share a 60/hour rate limit across every
+    caller on the same outbound IP - trivial to exhaust on a hosting
+    platform where that IP is shared across other customers. A
+    personal access token (no special scopes needed for public repos)
+    raises that to 5,000/hour. Works fine without one; just less
+    reliable in a shared-IP deployment.
+    """
+
+    headers = {"Accept": "application/vnd.github+json"}
+
+    token = os.getenv("GITHUB_TOKEN")
+
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+
+    return headers
+
+
+def _raise_for_rate_limit(resp: httpx.Response) -> None:
+    """Raise a clear error if GitHub rejected the request for rate limiting."""
+
+    if resp.status_code in (403, 429) and resp.headers.get(
+        "x-ratelimit-remaining"
+    ) == "0":
+        raise RepoChangeError(
+            "GitHub API rate limit reached for this server. Set a "
+            "GITHUB_TOKEN environment variable (a personal access "
+            "token, no special scopes needed) to raise the limit from "
+            "60 to 5,000 requests/hour, or try again later."
+        )
+
+
 def fetch_change(url: str) -> dict:
     """Fetch a commit or PR's metadata and file list from GitHub's public API."""
 
@@ -84,7 +120,7 @@ def fetch_change(url: str) -> dict:
 
     with httpx.Client(
         timeout=20,
-        headers={"Accept": "application/vnd.github+json"},
+        headers=_github_headers(),
     ) as client:
         if parsed["kind"] == "commit":
             resp = client.get(
@@ -95,6 +131,7 @@ def fetch_change(url: str) -> dict:
             if resp.status_code == 404:
                 raise RepoChangeError("Commit not found - check the URL.")
 
+            _raise_for_rate_limit(resp)
             resp.raise_for_status()
             data = resp.json()
 
@@ -113,6 +150,7 @@ def fetch_change(url: str) -> dict:
                     "Pull request not found - check the URL."
                 )
 
+            _raise_for_rate_limit(resp)
             resp.raise_for_status()
             pr = resp.json()
 
@@ -120,6 +158,7 @@ def fetch_change(url: str) -> dict:
                 f"https://api.github.com/repos/{owner}/{repo}"
                 f"/pulls/{parsed['ref']}/files"
             )
+            _raise_for_rate_limit(files_resp)
             files_resp.raise_for_status()
             files = files_resp.json()
 

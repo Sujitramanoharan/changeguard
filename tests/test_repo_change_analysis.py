@@ -4,9 +4,15 @@ Only the pure functions (no network) are tested here - fetch_change()
 itself talks to GitHub's API and is exercised manually/live instead.
 """
 
+import httpx
 import pytest
 
-from repo_change_analysis import RepoChangeError, analyze_change, parse_github_url
+from repo_change_analysis import (
+    RepoChangeError,
+    _raise_for_rate_limit,
+    analyze_change,
+    parse_github_url,
+)
 
 
 def test_parse_commit_url():
@@ -133,3 +139,26 @@ def test_analysis_metadata_is_included():
     assert result["analysis"]["files_changed"] == 1
     assert result["analysis"]["author"] == "dev"
     assert result["system"] == "acme/payments"
+
+
+def make_response(status_code, remaining):
+    return httpx.Response(
+        status_code=status_code,
+        headers={"x-ratelimit-remaining": remaining},
+        request=httpx.Request("GET", "https://api.github.com/x"),
+    )
+
+
+def test_exhausted_rate_limit_raises_clear_error():
+    with pytest.raises(RepoChangeError, match="rate limit"):
+        _raise_for_rate_limit(make_response(403, "0"))
+
+
+def test_403_with_remaining_quota_is_not_a_rate_limit_error():
+    # A 403 for another reason (e.g. blocked repo) shouldn't be
+    # misreported as a rate limit issue.
+    _raise_for_rate_limit(make_response(403, "10"))
+
+
+def test_ok_response_passes_through():
+    _raise_for_rate_limit(make_response(200, "59"))

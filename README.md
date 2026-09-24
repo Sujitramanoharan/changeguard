@@ -37,7 +37,11 @@ with a grounded, human-readable justification.
    fetches the real diff and derives change type, size, and rollback
    signals from it (`src/repo_change_analysis.py`), then pre-fills the same
    form for review before running the same pipeline above — nothing here
-   is a separate, unaudited path.
+   is a separate, unaudited path. Uses GitHub's public API, which shares
+   a 60-requests/hour rate limit across every caller on the same outbound
+   IP; set an optional `GITHUB_TOKEN` (a personal access token, no
+   special scopes needed) to raise that to 5,000/hour — important on a
+   host with a shared outbound IP.
 
 ## Architecture
 
