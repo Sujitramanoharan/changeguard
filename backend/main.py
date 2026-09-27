@@ -1,9 +1,11 @@
 """ChangeGuard FastAPI backend."""
 
+import json
 import logging
 import os
 import re
 import sys
+import threading
 from pathlib import Path
 from typing import Literal
 
@@ -11,7 +13,7 @@ sys.path.append(str(Path(__file__).parent.parent / "src"))
 
 from fastapi import Depends, FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -21,11 +23,12 @@ from slowapi.util import get_remote_address
 
 from agent_graph import assess_change_autonomous
 from agent import assess_change
-from config import CORS_ORIGINS, APP_VERSION
+from config import CORS_ORIGINS, APP_VERSION, METRICS_PATH
 from document_verification import verify_rollback_document
 from repo_change_analysis import RepoChangeError, analyze_github_url
 
 from backend.auth import (
+    ACCESS_TOKEN_EXPIRE_MINUTES,
     create_access_token,
     decode_access_token,
     verify_password,
@@ -34,11 +37,18 @@ from backend.auth import (
 from backend.database import (
     init_db,
     create_user,
+    delete_user,
+    list_users,
     save_assessment,
     get_all_assessments,
     get_stats,
     get_assessment_by_id,
     get_user_by_username,
+    save_document_verification,
+    get_document_verification,
+    record_cab_decision,
+    record_actual_outcome,
+    count_assessments,
 )
 
 
@@ -74,17 +84,20 @@ async def global_exception_handler(
         request.url.path,
     )
 
-    return {
-        "error": "Internal server error",
-        "message": "An unexpected error occurred while processing the request.",
-    }
+    return JSONResponse(
+        status_code=500,
+        content={
+            "error": "Internal server error",
+            "message": "An unexpected error occurred while processing the request.",
+        },
+    )
 
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=CORS_ORIGINS,
     allow_credentials=True,
-    allow_methods=["GET", "POST"],
+    allow_methods=["GET", "POST", "DELETE"],
     allow_headers=[
         "Content-Type",
         "Authorization",
@@ -129,6 +142,38 @@ def bootstrap_user_from_env(
 
 bootstrap_user_from_env("admin", "ADMIN_USERNAME", "ADMIN_PASSWORD")
 bootstrap_user_from_env("reviewer", "REVIEWER_USERNAME", "REVIEWER_PASSWORD")
+
+
+def seed_demo_data_if_empty():
+    """Seed the demo history in the background when the DB is empty.
+
+    Free hosting tiers (e.g. Render free) wipe the disk on every
+    restart. With SEED_DEMO_ON_EMPTY=true the dashboard repopulates
+    itself instead of showing an empty audit trail. Runs in a thread so
+    the server starts accepting requests (and passes health checks)
+    immediately.
+    """
+
+    if os.getenv("SEED_DEMO_ON_EMPTY", "").lower() not in ("1", "true", "yes"):
+        return
+
+    if count_assessments() > 0:
+        return
+
+    def run():
+        try:
+            from demo_data import seed_demo_assessments
+
+            count = seed_demo_assessments()
+            logger.info("Auto-seeded %s demo assessments", count)
+
+        except Exception:
+            logger.exception("Auto-seeding demo data failed")
+
+    threading.Thread(target=run, daemon=True).start()
+
+
+seed_demo_data_if_empty()
 
 
 security = HTTPBearer(
@@ -283,7 +328,7 @@ def login(request: Request, req: LoginRequest):
     return {
         "access_token": token,
         "token_type": "bearer",
-        "expires_in_minutes": 60,
+        "expires_in_minutes": ACCESS_TOKEN_EXPIRE_MINUTES,
         "user": {
             "id": user["id"],
             "username": user["username"],
@@ -357,9 +402,44 @@ class ChangeRequest(BaseModel):
         max_length=2000,
     )
 
-    rollback_document_provided: bool = False
+    # ID returned by /api/documents/verify-rollback. The verification
+    # result itself is looked up server-side - the client cannot claim
+    # a document was verified.
+    rollback_document_id: str | None = Field(
+        default=None,
+        max_length=64,
+    )
 
-    rollback_document_verified: bool = False
+
+def attach_document_evidence(
+    change: dict,
+    current_user: dict,
+) -> dict:
+    """Replace the client's document reference with the stored result."""
+
+    document_id = change.pop("rollback_document_id", None)
+
+    if not document_id:
+        change["rollback_document_provided"] = False
+        change["rollback_document_verified"] = False
+        return change
+
+    record = get_document_verification(document_id)
+
+    if not record or record["username"] != current_user["username"]:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Rollback document verification not found. "
+                "Upload the document again."
+            ),
+        )
+
+    change["rollback_document_provided"] = True
+    change["rollback_document_verified"] = record["verified"]
+    change["rollback_document_filename"] = record["filename"]
+
+    return change
 
 
 def parse_assessment(text: str):
@@ -455,6 +535,12 @@ def verify_rollback_document_upload(
 
     result = verify_rollback_document(text)
 
+    result["verification_id"] = save_document_verification(
+        username=current_user["username"],
+        filename=file.filename,
+        result=result,
+    )
+
     logger.info(
         "Rollback document verified | user=%s | filename=%s | verified=%s",
         current_user["username"],
@@ -535,7 +621,7 @@ def assess(
 ):
     """Run the controlled ChangeGuard assessment pipeline."""
 
-    change = req.model_dump()
+    change = attach_document_evidence(req.model_dump(), current_user)
 
     logger.info(
         "Starting controlled assessment | user=%s | system=%s | change_type=%s",
@@ -576,6 +662,7 @@ def assess(
         ),
         "evidence": result["evidence"],
         "policy": policy,
+        "explanation_source": result["explanation_source"],
         "recommendation": rec,
         "risk_level": lvl,
         "justification": jus,
@@ -601,6 +688,8 @@ def assess(
         "ml_prediction": result["ml_prediction"],
         "similar_changes": result["similar_changes"],
         "evidence": result["evidence"],
+        "policy": policy,
+        "explanation_source": result["explanation_source"],
         "recommendation": rec,
         "risk_level": lvl,
         "justification": jus,
@@ -614,7 +703,7 @@ def assess_autonomous(
 ):
     """Run the autonomous LangGraph ChangeGuard assessment."""
 
-    change = req.model_dump()
+    change = attach_document_evidence(req.model_dump(), current_user)
 
     logger.info(
         "Starting autonomous assessment | user=%s | system=%s | change_type=%s",
@@ -662,6 +751,7 @@ def assess_autonomous(
             "schedule"
         ),
         "policy": policy,
+        "explanation_source": result["explanation_source"],
         "recommendation": rec,
         "risk_level": lvl,
         "justification": jus,
@@ -687,6 +777,9 @@ def assess_autonomous(
     return {
         "id": new_id,
         "ml_prediction": ml_prediction,
+        "similar_changes": result.get("similar_changes"),
+        "policy": policy,
+        "explanation_source": result["explanation_source"],
         "recommendation": rec,
         "risk_level": lvl,
         "justification": jus,
@@ -731,6 +824,223 @@ def stats(
     """Return assessment statistics."""
 
     return get_stats()
+
+
+class CabDecisionRequest(BaseModel):
+    """The human Change Advisory Board's final call on a change."""
+
+    decision: Literal["APPROVE", "REJECT"]
+
+    comment: str = Field(
+        default="",
+        max_length=1000,
+    )
+
+
+@app.post("/api/assessments/{assessment_id}/decision")
+def cab_decision(
+    assessment_id: int,
+    req: CabDecisionRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    """Record the human CAB decision on top of the AI recommendation.
+
+    ChangeGuard advises; a person decides. Overriding the AI requires a
+    written reason so the audit trail explains every disagreement.
+    """
+
+    item = get_assessment_by_id(assessment_id)
+
+    if not item:
+        raise HTTPException(
+            status_code=404,
+            detail="Assessment not found",
+        )
+
+    overrides_ai = (
+        item["recommendation"] in ("APPROVE", "REJECT")
+        and req.decision != item["recommendation"]
+    )
+
+    if overrides_ai and not req.comment.strip():
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "A comment is required when overriding the AI "
+                "recommendation."
+            ),
+        )
+
+    record_cab_decision(
+        assessment_id,
+        req.decision,
+        req.comment.strip(),
+        current_user["username"],
+    )
+
+    logger.info(
+        "CAB decision recorded | assessment_id=%s | user=%s | "
+        "decision=%s | ai_recommendation=%s | override=%s",
+        assessment_id,
+        current_user["username"],
+        req.decision,
+        item["recommendation"],
+        overrides_ai,
+    )
+
+    return get_assessment_by_id(assessment_id)
+
+
+class OutcomeRequest(BaseModel):
+    """What actually happened after the change was implemented."""
+
+    outcome: Literal["Success", "Failed", "Caused-Incident"]
+
+
+@app.post("/api/assessments/{assessment_id}/outcome")
+def actual_outcome(
+    assessment_id: int,
+    req: OutcomeRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    """Record the real outcome, closing the loop on the AI's prediction."""
+
+    item = get_assessment_by_id(assessment_id)
+
+    if not item:
+        raise HTTPException(
+            status_code=404,
+            detail="Assessment not found",
+        )
+
+    if item.get("cab_decision") != "APPROVE":
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "An outcome can only be recorded for a change the CAB "
+                "approved."
+            ),
+        )
+
+    record_actual_outcome(
+        assessment_id,
+        req.outcome,
+        current_user["username"],
+    )
+
+    logger.info(
+        "Actual outcome recorded | assessment_id=%s | user=%s | outcome=%s",
+        assessment_id,
+        current_user["username"],
+        req.outcome,
+    )
+
+    return get_assessment_by_id(assessment_id)
+
+
+@app.get("/api/model/metrics")
+def model_metrics(
+    current_user: dict = Depends(get_current_user),
+):
+    """Return the held-out test metrics saved when the model was trained."""
+
+    if not METRICS_PATH.exists():
+        raise HTTPException(
+            status_code=404,
+            detail="Model metrics not available. Retrain the model.",
+        )
+
+    return json.loads(METRICS_PATH.read_text(encoding="utf-8"))
+
+
+class CreateUserRequest(BaseModel):
+    """A new ChangeGuard account created by an administrator."""
+
+    username: str = Field(
+        min_length=3,
+        max_length=100,
+        pattern=r"^[A-Za-z0-9_.-]+$",
+    )
+
+    password: str = Field(
+        min_length=8,
+        max_length=200,
+    )
+
+    role: Literal["admin", "reviewer"] = "reviewer"
+
+
+@app.get("/api/admin/users")
+def admin_list_users(
+    current_user: dict = Depends(require_admin),
+):
+    """List all user accounts (no password hashes)."""
+
+    return list_users()
+
+
+@app.post("/api/admin/users", status_code=201)
+def admin_create_user(
+    req: CreateUserRequest,
+    current_user: dict = Depends(require_admin),
+):
+    """Create a reviewer or admin account."""
+
+    if get_user_by_username(req.username):
+        raise HTTPException(
+            status_code=409,
+            detail="Username already exists.",
+        )
+
+    create_user(
+        username=req.username,
+        password=req.password,
+        role=req.role,
+    )
+
+    logger.info(
+        "User created | by=%s | username=%s | role=%s",
+        current_user["username"],
+        req.username,
+        req.role,
+    )
+
+    user = get_user_by_username(req.username)
+
+    return {
+        "id": user["id"],
+        "username": user["username"],
+        "role": user["role"],
+        "created_at": user["created_at"],
+    }
+
+
+@app.delete("/api/admin/users/{username}")
+def admin_delete_user(
+    username: str,
+    current_user: dict = Depends(require_admin),
+):
+    """Delete a user account. Admins cannot delete themselves."""
+
+    if username == current_user["username"]:
+        raise HTTPException(
+            status_code=400,
+            detail="You cannot delete your own account.",
+        )
+
+    if not delete_user(username):
+        raise HTTPException(
+            status_code=404,
+            detail="User not found.",
+        )
+
+    logger.info(
+        "User deleted | by=%s | username=%s",
+        current_user["username"],
+        username,
+    )
+
+    return {"deleted": username}
 
 
 @app.post("/api/admin/seed-demo-data")
@@ -802,9 +1112,12 @@ def serve_spa(full_path: str):
             ),
         )
 
-    target = DIST_DIR / full_path
+    dist_root = DIST_DIR.resolve()
+    target = (dist_root / full_path).resolve()
 
-    if target.is_file():
+    # Only serve files that really live inside the build directory -
+    # "../" segments in the URL must never escape it.
+    if target.is_relative_to(dist_root) and target.is_file():
         return FileResponse(target)
 
     return FileResponse(

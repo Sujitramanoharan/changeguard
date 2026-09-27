@@ -1,0 +1,265 @@
+"""API-level tests: authorization, security fixes, and the CAB workflow.
+
+The heavy ML/LLM pipeline is replaced with a fake so these tests exercise
+only the HTTP layer and its guarantees.
+"""
+
+import uuid
+
+import pytest
+from fastapi.testclient import TestClient
+
+import backend.main as main
+from backend.auth import create_access_token
+from backend.database import create_user
+
+
+CHANGE = {
+    "system": "Payments-Service",
+    "change_type": "Deployment",
+    "change_size": "Small",
+    "requester_team": "Backend",
+    "requested_window": "Off-Hours-Weekday",
+    "rollback_plan_exists": "Yes",
+    "rollback_plan_tested": "Yes",
+    "schedule_conflict": "No",
+    "description": "API test change.",
+}
+
+GOOD_DOC = b"""Rollback Procedure
+
+1. Disable the feature flag to stop new writes.
+2. Restore the database from the pre-change snapshot.
+3. Revert the deployment to the previous release.
+4. Verify recovery and notify the on-call channel.
+"""
+
+
+def make_user(role):
+    username = f"{role}-{uuid.uuid4().hex[:8]}"
+    create_user(username=username, password="password123", role=role)
+    token = create_access_token(username=username, role=role)
+    return username, {"Authorization": f"Bearer {token}"}
+
+
+@pytest.fixture
+def client():
+    return TestClient(main.app, raise_server_exceptions=False)
+
+
+@pytest.fixture
+def fake_pipeline(monkeypatch):
+    """Replace the real pipeline; record the change it was given."""
+
+    seen = {}
+
+    def fake_assess_change(change):
+        seen["change"] = change
+        return {
+            "ml_prediction": {"risk_probability": 0.1, "risk_level": "Low"},
+            "similar_changes": [],
+            "historical_context": {},
+            "evidence": {},
+            "policy": {
+                "recommendation": seen.get("recommendation", "APPROVE"),
+                "risk_level": "Low",
+                "score": 0.04,
+            },
+            "explanation_source": "fallback",
+            "assessment": "JUSTIFICATION: Test justification.",
+        }
+
+    monkeypatch.setattr(main, "assess_change", fake_assess_change)
+    return seen
+
+
+# -------------------------------------------------------------------
+# Authorization
+# -------------------------------------------------------------------
+
+def test_assess_requires_authentication(client):
+    assert client.post("/api/assess", json=CHANGE).status_code == 401
+
+
+def test_reviewer_cannot_use_autonomous_mode(client):
+    _, headers = make_user("reviewer")
+
+    resp = client.post("/api/assess-autonomous", json=CHANGE, headers=headers)
+
+    assert resp.status_code == 403
+
+
+def test_reviewer_cannot_manage_users(client):
+    _, headers = make_user("reviewer")
+
+    assert client.get("/api/admin/users", headers=headers).status_code == 403
+
+
+# -------------------------------------------------------------------
+# Security fixes
+# -------------------------------------------------------------------
+
+def test_spa_route_blocks_path_traversal(client, monkeypatch, tmp_path):
+    dist = tmp_path / "dist"
+    dist.mkdir()
+    (dist / "index.html").write_text("<html>app</html>")
+    (tmp_path / "secret.env").write_text("SECRET=leaked")
+
+    monkeypatch.setattr(main, "DIST_DIR", dist)
+
+    for path in ["/%2e%2e/secret.env", "/..%2fsecret.env"]:
+        resp = client.get(path)
+        assert "leaked" not in resp.text
+        assert "app" in resp.text  # falls back to the SPA shell
+
+
+def test_unhandled_error_returns_json_500(client, monkeypatch):
+    _, headers = make_user("reviewer")
+
+    def boom():
+        raise RuntimeError("unexpected")
+
+    monkeypatch.setattr(main, "get_stats", boom)
+
+    resp = client.get("/api/stats", headers=headers)
+
+    assert resp.status_code == 500
+    assert resp.json()["error"] == "Internal server error"
+
+
+def test_client_cannot_claim_document_was_verified(client, fake_pipeline):
+    _, headers = make_user("reviewer")
+
+    # Old-style booleans from the client are ignored entirely.
+    payload = {
+        **CHANGE,
+        "rollback_document_provided": True,
+        "rollback_document_verified": True,
+    }
+    assert client.post("/api/assess", json=payload, headers=headers).status_code == 200
+    assert fake_pipeline["change"]["rollback_document_provided"] is False
+    assert fake_pipeline["change"]["rollback_document_verified"] is False
+
+    # A made-up verification ID is rejected.
+    payload = {**CHANGE, "rollback_document_id": "does-not-exist"}
+    assert client.post("/api/assess", json=payload, headers=headers).status_code == 400
+
+
+def test_document_verification_is_bound_to_assessment(client, fake_pipeline):
+    _, headers = make_user("reviewer")
+
+    upload = client.post(
+        "/api/documents/verify-rollback",
+        files={"file": ("rollback.txt", GOOD_DOC, "text/plain")},
+        headers=headers,
+    ).json()
+
+    assert upload["verified"] is True
+
+    payload = {**CHANGE, "rollback_document_id": upload["verification_id"]}
+    assert client.post("/api/assess", json=payload, headers=headers).status_code == 200
+
+    assert fake_pipeline["change"]["rollback_document_provided"] is True
+    assert fake_pipeline["change"]["rollback_document_verified"] is True
+
+
+def test_cannot_use_another_users_document(client, fake_pipeline):
+    _, owner = make_user("reviewer")
+    _, other = make_user("reviewer")
+
+    upload = client.post(
+        "/api/documents/verify-rollback",
+        files={"file": ("rollback.txt", GOOD_DOC, "text/plain")},
+        headers=owner,
+    ).json()
+
+    payload = {**CHANGE, "rollback_document_id": upload["verification_id"]}
+
+    assert client.post("/api/assess", json=payload, headers=other).status_code == 400
+
+
+# -------------------------------------------------------------------
+# Human CAB decision and outcome
+# -------------------------------------------------------------------
+
+def create_assessment(client, headers):
+    resp = client.post("/api/assess", json=CHANGE, headers=headers)
+    assert resp.status_code == 200
+    return resp.json()["id"]
+
+
+def test_override_requires_comment(client, fake_pipeline):
+    _, headers = make_user("reviewer")
+    assessment_id = create_assessment(client, headers)  # AI says APPROVE
+
+    resp = client.post(
+        f"/api/assessments/{assessment_id}/decision",
+        json={"decision": "REJECT", "comment": ""},
+        headers=headers,
+    )
+    assert resp.status_code == 400
+
+    resp = client.post(
+        f"/api/assessments/{assessment_id}/decision",
+        json={"decision": "REJECT", "comment": "Freeze window this week."},
+        headers=headers,
+    )
+    assert resp.status_code == 200
+    assert resp.json()["cab_decision"] == "REJECT"
+
+
+def test_decision_and_outcome_flow(client, fake_pipeline):
+    username, headers = make_user("reviewer")
+    assessment_id = create_assessment(client, headers)
+
+    # No outcome before the CAB approves.
+    resp = client.post(
+        f"/api/assessments/{assessment_id}/outcome",
+        json={"outcome": "Success"},
+        headers=headers,
+    )
+    assert resp.status_code == 400
+
+    resp = client.post(
+        f"/api/assessments/{assessment_id}/decision",
+        json={"decision": "APPROVE"},
+        headers=headers,
+    )
+    assert resp.status_code == 200
+    assert resp.json()["cab_decided_by"] == username
+
+    resp = client.post(
+        f"/api/assessments/{assessment_id}/outcome",
+        json={"outcome": "Failed"},
+        headers=headers,
+    )
+    assert resp.status_code == 200
+    assert resp.json()["actual_outcome"] == "Failed"
+
+    stats = client.get("/api/stats", headers=headers).json()
+    assert stats["outcomes_recorded"] >= 1
+    assert stats["bad_outcomes"] >= 1
+
+
+# -------------------------------------------------------------------
+# User management
+# -------------------------------------------------------------------
+
+def test_admin_can_create_and_delete_users(client):
+    admin, headers = make_user("admin")
+    new_name = f"new-{uuid.uuid4().hex[:6]}"
+
+    resp = client.post(
+        "/api/admin/users",
+        json={"username": new_name, "password": "longpassword", "role": "reviewer"},
+        headers=headers,
+    )
+    assert resp.status_code == 201
+    assert "password_hash" not in resp.json()
+
+    listed = client.get("/api/admin/users", headers=headers).json()
+    assert any(u["username"] == new_name for u in listed)
+    assert all("password_hash" not in u for u in listed)
+
+    assert client.delete(f"/api/admin/users/{new_name}", headers=headers).status_code == 200
+    assert client.delete(f"/api/admin/users/{admin}", headers=headers).status_code == 400

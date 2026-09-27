@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { api } from "../api";
 import Badge from "../components/Badge";
 import AssessmentDetailModal from "../components/AssessmentDetailModal";
-import { Search, Download, Filter, History as HistoryIcon, ArrowUpRight, Calendar, Server, Tag, Shield } from "lucide-react";
+import { Search, Download, History as HistoryIcon, ArrowUpRight } from "lucide-react";
 
 export default function History() {
   const [rows, setRows] = useState([]);
@@ -11,8 +11,11 @@ export default function History() {
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedItem, setSelectedItem] = useState(null);
 
-  useEffect(() => {
+  const load = () =>
     api.history().then(setRows).catch((err) => console.error(err)).finally(() => setLoading(false));
+
+  useEffect(() => {
+    load();
   }, []);
 
   const filtered = rows.filter((r) => {
@@ -26,7 +29,7 @@ export default function History() {
 
   const exportCSV = () => {
     if (filtered.length === 0) return;
-    const headers = ["ID", "Date", "System", "Change Type", "Size", "Team", "Risk Level", "Recommendation", "Justification"];
+    const headers = ["ID", "Date", "System", "Change Type", "Size", "Team", "Risk Level", "AI Recommendation", "CAB Decision", "CAB Decided By", "CAB Comment", "Actual Outcome", "Justification"];
     const csvRows = [headers.join(",")];
     filtered.forEach((r) => {
       const row = [
@@ -38,6 +41,10 @@ export default function History() {
         `"${r.requester_team || ''}"`,
         `"${r.risk_level}"`,
         `"${r.recommendation}"`,
+        `"${r.cab_decision || 'Pending'}"`,
+        `"${r.cab_decided_by || ''}"`,
+        `"${(r.cab_comment || '').replace(/"/g, '""')}"`,
+        `"${r.actual_outcome || ''}"`,
         `"${(r.justification || '').replace(/"/g, '""')}"`,
       ];
       csvRows.push(row.join(","));
@@ -123,7 +130,8 @@ export default function History() {
                   <th className="px-5 py-3.5">System</th>
                   <th className="px-5 py-3.5">Change Type</th>
                   <th className="px-5 py-3.5">Risk Rating</th>
-                  <th className="px-5 py-3.5">Recommendation</th>
+                  <th className="px-5 py-3.5">AI Recommendation</th>
+                  <th className="px-5 py-3.5">CAB Decision</th>
                   <th className="px-5 py-3.5 text-right">Action</th>
                 </tr>
               </thead>
@@ -141,6 +149,13 @@ export default function History() {
                     <td className="px-5 py-4 text-slate-600 font-medium">{r.change_type}</td>
                     <td className="px-5 py-4"><Badge value={r.risk_level} /></td>
                     <td className="px-5 py-4"><Badge value={r.recommendation} /></td>
+                    <td className="px-5 py-4">
+                      {r.cab_decision ? (
+                        <Badge value={r.cab_decision} showIcon={false} />
+                      ) : (
+                        <span className="text-[11px] font-semibold text-slate-400">Pending</span>
+                      )}
+                    </td>
                     <td className="px-5 py-4 text-right">
                       <span className="inline-flex items-center gap-1 font-semibold text-indigo-600 group-hover:underline">
                         Details <ArrowUpRight className="w-3.5 h-3.5" />
@@ -156,7 +171,7 @@ export default function History() {
 
       {/* Modal View */}
       {selectedItem && (
-        <AssessmentDetailModal item={selectedItem} onClose={() => setSelectedItem(null)} />
+        <AssessmentDetailModal item={selectedItem} onClose={() => setSelectedItem(null)} onUpdated={load} />
       )}
     </div>
   );

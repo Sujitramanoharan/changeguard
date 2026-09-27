@@ -7,6 +7,7 @@ import {
   ShieldCheck,
   LogOut,
   UserCircle,
+  Users,
 } from "lucide-react";
 import { api } from "../api";
 
@@ -40,6 +41,11 @@ export default function Layout() {
   const username = user?.username || "User";
   const role = user?.role || "reviewer";
 
+  const navLinks =
+    role === "admin"
+      ? [...links, { to: "/users", label: "Users", icon: Users }]
+      : links;
+
   const handleLogout = () => {
     api.logout();
   };
@@ -68,7 +74,7 @@ export default function Layout() {
 
         {/* Navigation */}
         <nav className="flex flex-col gap-1.5 flex-1">
-          {links.map((link) => {
+          {navLinks.map((link) => {
             const Icon = link.icon;
 
             return (
@@ -141,7 +147,7 @@ export default function Layout() {
             </div>
 
             <div className="text-[10.5px] font-mono text-slate-400 flex justify-between pt-1 border-t border-slate-700/40">
-              <span>LangGraph + FAISS</span>
+              <span>ML + FAISS + Policy</span>
 
               <span className="text-indigo-400">
                 v1.0.0

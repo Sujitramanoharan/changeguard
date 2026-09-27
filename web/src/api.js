@@ -92,6 +92,15 @@ async function get(path) {
   return handleResponse(res);
 }
 
+async function del(path) {
+  const res = await fetch(BASE + path, {
+    method: "DELETE",
+    headers: getHeaders(),
+  });
+
+  return handleResponse(res);
+}
+
 async function login(username, password) {
   const res = await fetch(BASE + "/auth/login", {
     method: "POST",
@@ -176,4 +185,13 @@ export const api = {
   history: () => get("/history"),
   getAssessment: (id) => get(`/assessments/${id}`),
   stats: () => get("/stats"),
+  recordDecision: (id, decision, comment) =>
+    post(`/assessments/${id}/decision`, { decision, comment }),
+  recordOutcome: (id, outcome) =>
+    post(`/assessments/${id}/outcome`, { outcome }),
+  modelMetrics: () => get("/model/metrics"),
+  listUsers: () => get("/admin/users"),
+  createUser: (user) => post("/admin/users", user),
+  deleteUser: (username) =>
+    del(`/admin/users/${encodeURIComponent(username)}`),
 };

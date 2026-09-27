@@ -1,4 +1,7 @@
 """Train the ChangeGuard risk-prediction model."""
+import json
+from datetime import datetime, timezone
+
 import numpy as np
 import joblib
 from sklearn.linear_model import LogisticRegression
@@ -14,7 +17,16 @@ from sklearn.metrics import (
     brier_score_loss,
 )
 
-from config import MODEL_PATH, ENCODERS_PATH, THRESHOLD_PATH, FEATURE_COLUMNS
+from sklearn.calibration import calibration_curve
+
+from config import (
+    MODEL_PATH,
+    ENCODERS_PATH,
+    THRESHOLD_PATH,
+    METRICS_PATH,
+    FEATURE_COLUMNS,
+    MODEL_VERSION,
+)
 from data_prep import load_and_prepare
 
 
@@ -157,8 +169,40 @@ def train():
     joblib.dump(encoders, ENCODERS_PATH)
     joblib.dump(best_threshold, THRESHOLD_PATH)
 
+    # Held-out metrics for the in-app model card (/api/model/metrics).
+    frac_pos, mean_pred = calibration_curve(
+        y_test, probs, n_bins=5, strategy="quantile"
+    )
+
+    metrics = {
+        "model_version": MODEL_VERSION,
+        "model_type": "Logistic Regression (sigmoid-calibrated)",
+        "trained_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
+        "train_rows": int(len(y_train)),
+        "test_rows": int(len(y_test)),
+        "test_bad_rate": round(float(y_test.mean()), 3),
+        "roc_auc": round(float(roc_auc_score(y_test, probs)), 3),
+        "brier_score": round(float(brier_score_loss(y_test, probs)), 3),
+        "threshold": round(best_threshold, 3),
+        "accuracy": round(float(accuracy_score(y_test, preds)), 3),
+        "precision": round(float(precision_score(y_test, preds)), 3),
+        "recall": round(float(recall_score(y_test, preds)), 3),
+        "f1": round(float(f1_score(y_test, preds)), 3),
+        "calibration": [
+            {"predicted": round(float(p), 3), "observed": round(float(o), 3)}
+            for p, o in zip(mean_pred, frac_pos)
+        ],
+        "feature_influence": [
+            {"feature": name, "coefficient": round(float(c), 3)}
+            for name, c in coefs
+        ],
+    }
+
+    METRICS_PATH.write_text(json.dumps(metrics, indent=2), encoding="utf-8")
+
     print("\nModel saved to:", MODEL_PATH)
     print("Threshold saved to:", THRESHOLD_PATH)
+    print("Metrics saved to:", METRICS_PATH)
 
 
 if __name__ == "__main__":

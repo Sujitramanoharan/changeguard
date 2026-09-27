@@ -579,6 +579,8 @@ Do not create a different risk level.
     # 6. Deterministic fallback explanation
     # ---------------------------------------------------------------
 
+    explanation_source = "llm" if llm_justification else "fallback"
+
     if not llm_justification:
 
         incidents = get_incident_history(
@@ -647,19 +649,20 @@ Do not create a different risk level.
                 f"with a known scheduling risk."
             )
 
+        if policy.get("evidence_mismatch"):
+
+            justification_parts.append(
+                "CRITICAL: A rollback plan document was uploaded but "
+                "does not substantiate a real rollback procedure."
+            )
+
         llm_justification = " ".join(
             justification_parts
         )
 
-        if not tool_calls_made:
-
-            tool_calls_made = [
-                "ml_risk_score",
-                "similar_past_changes",
-                "incident_history",
-                "schedule_conflicts",
-                "rollback_safety",
-            ]
+        # tool_calls_made is left as-is: it records only the tools the
+        # LLM actually chose. The deterministic fallback gathers its
+        # evidence directly and must not be reported as agent tool calls.
 
     # ---------------------------------------------------------------
     # 7. Final answer
@@ -689,4 +692,5 @@ Do not create a different risk level.
         "similar_changes": similar_changes,
         "schedule": schedule_data,
         "policy": policy,
+        "explanation_source": explanation_source,
     }

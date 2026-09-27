@@ -52,11 +52,15 @@ COPY --from=frontend-builder /app/frontend_dist ./frontend_dist
 EXPOSE 7860
 
 # Container health check
-HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD curl -f http://localhost:7860/health || exit 1
+HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
+    CMD curl -f http://localhost:${PORT:-7860}/health || exit 1
 
 # Start production server.
 # A single worker on purpose: each worker independently loads the full
 # ML model, FAISS index, and embedding model into memory, which does
 # not fit in the 512MB RAM of small/free hosting tiers with more than one.
-CMD ["uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "7860", "--workers", "1"]
+#
+# $PORT is set by hosts such as Render; 7860 is the local default.
+# --proxy-headers makes the real client IP (X-Forwarded-For) visible,
+# so the login rate limit is per user rather than per load balancer.
+CMD ["sh", "-c", "uvicorn backend.main:app --host 0.0.0.0 --port ${PORT:-7860} --workers 1 --proxy-headers --forwarded-allow-ips='*'"]

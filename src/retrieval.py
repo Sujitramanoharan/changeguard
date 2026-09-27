@@ -36,10 +36,16 @@ _meta = joblib.load(
 # Similar-change retrieval
 # -------------------------------------------------------------------
 
+# Shared by inference and training (src/data_prep.py) so the model's
+# similar-change features are computed identically in both.
+DEFAULT_K = 5
+MIN_SIMILARITY = 0.70
+
+
 def find_similar_changes(
     query_text,
-    k=5,
-    min_similarity=0.70,
+    k=DEFAULT_K,
+    min_similarity=MIN_SIMILARITY,
 ):
     """Return sufficiently similar past changes with their outcomes."""
 

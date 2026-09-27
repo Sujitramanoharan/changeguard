@@ -1,0 +1,33 @@
+# Render Blueprint for ChangeGuard.
+# In the Render dashboard: New -> Blueprint -> select this repo.
+# Values marked `sync: false` are prompted for when the Blueprint is created.
+services:
+  - type: web
+    name: changeguard
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: CHANGEGUARD_JWT_SECRET
+        generateValue: true
+      - key: GROQ_API_KEY
+        sync: false
+      - key: ADMIN_USERNAME
+        sync: false
+      - key: ADMIN_PASSWORD
+        sync: false
+      - key: REVIEWER_USERNAME
+        sync: false
+      - key: REVIEWER_PASSWORD
+        sync: false
+      # Optional: raises the GitHub API limit from 60 to 5,000 requests/hour.
+      - key: GITHUB_TOKEN
+        sync: false
+      # The free plan's disk is wiped on every restart/deploy; this
+      # repopulates the demo history automatically when the DB is empty.
+      - key: SEED_DEMO_ON_EMPTY
+        value: "true"
+      - key: CHANGEGUARD_DB_PATH
+        value: /app/data/changeguard.db

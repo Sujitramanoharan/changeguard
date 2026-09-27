@@ -336,6 +336,8 @@ JUSTIFICATION: <2-4 sentences using only facts supported by the evidence above.>
     # 8. Fallback if LLM is unavailable
     # ---------------------------------------------------------
 
+    explanation_source = "llm" if assessment_text else "fallback"
+
     if not assessment_text:
         assessment_text = generate_fallback_assessment(
             change,
@@ -358,6 +360,7 @@ JUSTIFICATION: <2-4 sentences using only facts supported by the evidence above.>
             "document": document,
         },
         "policy": policy,
+        "explanation_source": explanation_source,
         "assessment": assessment_text,
     }
 

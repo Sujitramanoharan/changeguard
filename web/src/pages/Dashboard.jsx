@@ -3,8 +3,8 @@ import { Link } from "react-router-dom";
 import { api } from "../api";
 import Badge from "../components/Badge";
 import AssessmentDetailModal from "../components/AssessmentDetailModal";
-import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, BarChart, Bar, XAxis, YAxis } from "recharts";
-import { ShieldCheck, ShieldAlert, CheckCircle2, AlertOctagon, Plus, ChevronRight, Activity, Cpu, ArrowUpRight } from "lucide-react";
+import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from "recharts";
+import { ShieldAlert, CheckCircle2, AlertOctagon, Plus, ChevronRight, Activity, Cpu, ArrowUpRight, Gavel, RefreshCcw } from "lucide-react";
 
 export default function Dashboard() {
   const [stats, setStats] = useState(null);
@@ -12,7 +12,7 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [selectedItem, setSelectedItem] = useState(null);
 
-  useEffect(() => {
+  const load = () =>
     Promise.all([api.stats(), api.history()])
       .then(([s, h]) => {
         setStats(s);
@@ -20,6 +20,9 @@ export default function Dashboard() {
       })
       .catch((err) => console.error("Failed to load dashboard data", err))
       .finally(() => setLoading(false));
+
+  useEffect(() => {
+    load();
   }, []);
 
   const total = stats?.total || 0;
@@ -27,7 +30,13 @@ export default function Dashboard() {
   const mediumRisk = stats?.medium_risk || 0;
   const lowRisk = stats?.low_risk || 0;
   const rejected = stats?.rejected || 0;
-  const approvalRate = total > 0 ? Math.round(((total - rejected) / total) * 100) : 100;
+  const approved = stats?.approved || 0;
+  const approvalRate = total > 0 ? Math.round((approved / total) * 100) : 0;
+  const pending = stats?.pending_decision || 0;
+  const overrides = stats?.cab_overrides || 0;
+  const outcomes = stats?.outcomes_recorded || 0;
+  const badOutcomes = stats?.bad_outcomes || 0;
+  const badFlagged = stats?.bad_outcomes_flagged || 0;
 
   const pieData = [
     { name: "High Risk", value: highRisk, color: "#e11d48" },
@@ -48,7 +57,7 @@ export default function Dashboard() {
           </div>
           <h1 className="text-3xl font-extrabold tracking-tight text-white">Change Risk Operations</h1>
           <p className="text-slate-300 text-sm max-w-xl">
-            Real-time automated change advisory analysis powered by XGBoost ML, FAISS Vector RAG, and LangGraph autonomous reasoning.
+            Real-time automated change advisory analysis powered by a calibrated ML risk model, FAISS retrieval over past changes, a deterministic risk policy, and LLM explanations.
           </p>
         </div>
         <div className="relative z-10 flex items-center gap-3">
@@ -81,18 +90,44 @@ export default function Dashboard() {
           subText={`${total > 0 ? Math.round((highRisk / total) * 100) : 0}% of total changes`}
         />
         <StatCard
-          label="Auto Rejections"
+          label="AI Rejections"
           value={rejected}
           icon={AlertOctagon}
           gradient="from-amber-500 to-orange-600"
-          subText="Safeguarded from production"
+          subText="Recommended REJECT by policy"
         />
         <StatCard
-          label="Approval Rate"
+          label="AI Approval Rate"
           value={`${approvalRate}%`}
           icon={CheckCircle2}
           gradient="from-emerald-500 to-teal-600"
-          subText="CAB cleared changes"
+          subText="Recommended APPROVE outright"
+        />
+      </div>
+
+      {/* Human-in-the-loop strip */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <MiniCard
+          icon={Gavel}
+          label="Awaiting CAB decision"
+          value={pending}
+          text="Open an assessment to approve or reject it."
+        />
+        <MiniCard
+          icon={Activity}
+          label="Human overrides of the AI"
+          value={overrides}
+          text={`Out of ${stats?.cab_decided || 0} CAB decisions recorded.`}
+        />
+        <MiniCard
+          icon={RefreshCcw}
+          label="Feedback loop"
+          value={outcomes === 0 ? "No data" : `${badFlagged}/${badOutcomes}`}
+          text={
+            outcomes === 0
+              ? "Record real outcomes on approved changes."
+              : `Changes that went badly which the AI had flagged (REVIEW/REJECT). ${outcomes} outcome(s) recorded.`
+          }
         />
       </div>
 
@@ -208,8 +243,23 @@ export default function Dashboard() {
 
       {/* Modal for full detail view */}
       {selectedItem && (
-        <AssessmentDetailModal item={selectedItem} onClose={() => setSelectedItem(null)} />
+        <AssessmentDetailModal item={selectedItem} onClose={() => setSelectedItem(null)} onUpdated={load} />
       )}
+    </div>
+  );
+}
+
+function MiniCard({ icon: Icon, label, value, text }) {
+  return (
+    <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs p-4 flex items-start gap-3">
+      <div className="w-9 h-9 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center flex-shrink-0">
+        <Icon className="w-4 h-4" />
+      </div>
+      <div className="min-w-0">
+        <div className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">{label}</div>
+        <div className="text-xl font-extrabold text-slate-900">{value}</div>
+        <p className="text-[11px] text-slate-500 mt-0.5">{text}</p>
+      </div>
     </div>
   );
 }

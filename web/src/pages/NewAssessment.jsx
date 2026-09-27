@@ -64,9 +64,6 @@ const PRESETS = {
     rollback_plan_exists: "No",
     rollback_plan_tested: "None",
     schedule_conflict: "Yes",
-    system_incidents_last_90_days: 3,
-    similar_past_changes_count: 5,
-    similar_past_changes_failure_rate: 0.4,
     description:
       "Adding new indexed transactions column to main payments DB during peak processing hours without tested rollback script.",
   },
@@ -80,9 +77,6 @@ const PRESETS = {
     rollback_plan_exists: "Yes",
     rollback_plan_tested: "No",
     schedule_conflict: "No",
-    system_incidents_last_90_days: 1,
-    similar_past_changes_count: 5,
-    similar_past_changes_failure_rate: 0.2,
     description:
       "Upgrading Kubernetes cluster node pool for Auth-Service over the weekend window.",
   },
@@ -96,9 +90,6 @@ const PRESETS = {
     rollback_plan_exists: "Yes",
     rollback_plan_tested: "Yes",
     schedule_conflict: "No",
-    system_incidents_last_90_days: 0,
-    similar_past_changes_count: 5,
-    similar_past_changes_failure_rate: 0.05,
     description:
       "Routine patch update for static asset bundler during off-hours with tested automated rollback.",
   },
@@ -164,16 +155,14 @@ export default function NewAssessment() {
 
       setForm((f) => ({
         ...f,
-        rollback_document_provided: true,
-        rollback_document_verified: verification.verified,
+        rollback_document_id: verification.verification_id,
       }));
     } catch (err) {
       setDocError(err?.message || "Could not verify this document.");
 
       setForm((f) => ({
         ...f,
-        rollback_document_provided: true,
-        rollback_document_verified: false,
+        rollback_document_id: null,
       }));
     } finally {
       setDocChecking(false);
@@ -213,8 +202,7 @@ export default function NewAssessment() {
 
     setForm((f) => ({
       ...f,
-      rollback_document_provided: false,
-      rollback_document_verified: false,
+      rollback_document_id: null,
     }));
   }
 
@@ -250,17 +238,18 @@ export default function NewAssessment() {
     const steps =
       mode === "controlled"
         ? [
-            "1. Feature Extraction & Encoding",
-            "2. ML Risk Model Probability Scoring",
-            "3. FAISS Vector RAG Retrieval",
-            "4. System Incident & Window Evidence Check",
-            "5. LangChain LLM Risk Reasoning & Safeguards",
+            "1. FAISS Retrieval of Similar Past Changes",
+            "2. Backend-Derived Historical Context",
+            "3. ML Risk Model Probability Scoring",
+            "4. Incident, Schedule & Rollback Evidence",
+            "5. Deterministic Risk Policy Decision",
+            "6. LLM Explanation of the Decision",
           ]
         : [
-            "1. LangGraph Agent Initializing State",
-            "2. Dynamically Selecting Evidence Tools",
-            "3. Executing Tool Loop (ML + FAISS + Tools)",
-            "4. Verifying Risk Justification & Constraints",
+            "1. Deterministic Risk Policy Decision",
+            "2. LangGraph Agent Initializing State",
+            "3. Agent Selecting Evidence Tools",
+            "4. Agent Writing Evidence-Cited Justification",
           ];
 
     setAgentSteps(steps);
@@ -475,7 +464,7 @@ export default function NewAssessment() {
                 </span>
 
                 <span className="text-[11px] font-normal text-slate-500">
-                  Fixed sequence: ML &rarr; RAG &rarr; Tools &rarr; LLM
+                  Fixed sequence: RAG &rarr; ML &rarr; Tools &rarr; Policy &rarr; LLM
                 </span>
               </button>
 
@@ -789,7 +778,25 @@ export default function NewAssessment() {
                   </span>
                 </div>
 
-                {result.tools_called && (
+                <div className="flex items-center justify-between text-xs border-t border-slate-700/60 pt-2">
+                  <span className="text-slate-400">Explanation:</span>
+
+                  <span className="text-indigo-300 font-mono">
+                    {result.explanation_source === "llm"
+                      ? "LLM (Groq)"
+                      : "Rule-based fallback"}
+                  </span>
+                </div>
+
+                <div className="flex items-center justify-between text-xs border-t border-slate-700/60 pt-2">
+                  <span className="text-slate-400">CAB decision:</span>
+
+                  <span className="text-amber-300 font-semibold">
+                    Pending
+                  </span>
+                </div>
+
+                {result.tools_called?.length > 0 && (
                   <div className="border-t border-slate-700/60 pt-2">
                     <p className="text-[11px] font-bold text-slate-400 uppercase mb-1.5">
                       Tools Executed:
@@ -811,15 +818,14 @@ export default function NewAssessment() {
 
               <button
                 onClick={() =>
-                  setFullModalItem({
-                    ...result,
-                    ...form,
-                    id: result.id || "NEW",
-                  })
+                  api
+                    .getAssessment(result.id)
+                    .then(setFullModalItem)
+                    .catch((e) => setError(e?.message))
                 }
                 className="w-full bg-slate-800 hover:bg-slate-700 text-white font-semibold text-xs py-2.5 rounded-xl border border-slate-700 transition-colors flex items-center justify-center gap-1.5"
               >
-                Inspect Full Assessment JSON & Graph &rarr;
+                Open Full Assessment &amp; Record CAB Decision &rarr;
               </button>
             </div>
           )}

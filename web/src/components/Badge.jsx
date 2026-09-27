@@ -1,5 +1,5 @@
 import React from "react";
-import { AlertTriangle, CheckCircle, ShieldAlert, Clock, ShieldCheck } from "lucide-react";
+import { ShieldAlert, Clock, ShieldCheck } from "lucide-react";
 
 const STYLES = {
   High: "bg-red-50 text-red-700 ring-1 ring-red-200/80 shadow-xs",

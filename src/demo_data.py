@@ -9,7 +9,14 @@ import sqlite3
 from datetime import datetime, timedelta
 
 from agent import assess_change
-from backend.database import DB_PATH, init_db, save_assessment
+from backend.database import (
+    DB_PATH,
+    get_assessment_by_id,
+    init_db,
+    record_actual_outcome,
+    record_cab_decision,
+    save_assessment,
+)
 
 
 SCENARIOS = [
@@ -145,6 +152,7 @@ def seed_demo_assessments():
             "historical_context": result.get("historical_context"),
             "evidence": result["evidence"],
             "policy": policy,
+            "explanation_source": result["explanation_source"],
             "recommendation": policy["recommendation"],
             "risk_level": policy["risk_level"],
             "justification": jus,
@@ -178,5 +186,30 @@ def seed_demo_assessments():
 
     conn.commit()
     conn.close()
+
+    # Give the older half of the history a (clearly labelled) demo CAB
+    # decision - and, for approved changes, a recorded outcome - so the
+    # feedback-loop metrics have data. The newest assessments stay
+    # pending so a live demo can make the CAB decision itself.
+    decided = new_ids[: len(new_ids) // 2]
+
+    for i, assessment_id in enumerate(decided):
+        item = get_assessment_by_id(assessment_id)
+        rec = item["recommendation"]
+        decision = "REJECT" if rec == "REJECT" else "APPROVE"
+
+        record_cab_decision(
+            assessment_id,
+            decision,
+            "Demo seed: CAB accepted the ChangeGuard recommendation."
+            if rec != "REVIEW"
+            else "Demo seed: reviewed evidence with the requester; approved.",
+            "demo-cab",
+        )
+
+        if decision == "APPROVE":
+            # One reviewed change goes badly, to show the loop in action.
+            outcome = "Failed" if rec == "REVIEW" and i % 2 == 0 else "Success"
+            record_actual_outcome(assessment_id, outcome, "demo-cab")
 
     return len(new_ids)

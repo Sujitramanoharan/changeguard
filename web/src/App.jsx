@@ -5,6 +5,7 @@ import NewAssessment from "./pages/NewAssessment";
 import History from "./pages/History";
 import About from "./pages/About";
 import Login from "./pages/Login";
+import Users from "./pages/Users";
 import { api } from "./api";
 
 function ProtectedRoute({ children }) {
@@ -34,6 +35,7 @@ export default function App() {
           <Route path="/new" element={<NewAssessment />} />
           <Route path="/history" element={<History />} />
           <Route path="/about" element={<About />} />
+          <Route path="/users" element={<Users />} />
         </Route>
 
         {/* Unknown routes */}
