@@ -183,3 +183,13 @@ def test_more_incidents_never_lower_risk():
     ]
 
     assert probs == sorted(probs)
+
+
+def test_rare_flags_do_not_dominate_similarity():
+    # A rare flag (88 emergency changes out of 26,000) must not pull in
+    # emergency changes on unrelated systems.
+    ticket = agent.prepare_ticket({**BASE_TICKET, "emergency": True})
+
+    similar = agent.similar_tickets(ticket)
+
+    assert all(s["system"].startswith("Windows Server") for s in similar)

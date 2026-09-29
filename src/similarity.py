@@ -1,7 +1,8 @@
 """FAISS nearest-neighbour search over real historical changes.
 
 Each historical change is encoded from the same attributes the risk
-model uses (one-hot categories + log-scaled, standardised numbers) and
+model uses (one-hot categories + log-scaled numbers min-max scaled to
+0-1, so every attribute weighs the same as a category match) and
 searched by Euclidean distance, so a 5-line commit is never "similar"
 to a 5,000-line one. The neighbours' real outcomes are shown to
 reviewers and feed the risk policy.
@@ -11,7 +12,7 @@ import faiss
 import numpy as np
 from sklearn.compose import ColumnTransformer
 from sklearn.pipeline import make_pipeline
-from sklearn.preprocessing import FunctionTransformer, OneHotEncoder, StandardScaler
+from sklearn.preprocessing import FunctionTransformer, MinMaxScaler, OneHotEncoder
 
 
 def log1p_clipped(X):
@@ -21,7 +22,12 @@ def log1p_clipped(X):
 
 
 def make_encoder(categorical: list, numeric: list) -> ColumnTransformer:
-    """One-hot categories + log-scaled, standardised numbers."""
+    """One-hot categories + log-scaled numbers min-max scaled to 0-1.
+
+    Min-max rather than standardisation: standardising a rare binary flag
+    (e.g. 88 emergency changes in 26,000) inflates it ~18x, so every
+    emergency change would look "similar" whatever its system.
+    """
 
     transformers = []
 
@@ -37,7 +43,7 @@ def make_encoder(categorical: list, numeric: list) -> ColumnTransformer:
             "num",
             make_pipeline(
                 FunctionTransformer(log1p_clipped),
-                StandardScaler(),
+                MinMaxScaler(),
             ),
             numeric,
         ))
