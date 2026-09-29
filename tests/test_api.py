@@ -15,11 +15,19 @@ from backend.database import create_user
 
 
 CHANGE = {
-    "system": "Payments-Service",
-    "change_type": "Deployment",
-    "change_size": "Small",
-    "requester_team": "Backend",
-    "requested_window": "Off-Hours-Weekday",
+    "title": "Patch Windows servers",
+    "ci_type": "computer",
+    "ci_subtype": "Windows Server",
+    "change_family": "Standard Change Type",
+    "risk_classification": "Minor Change",
+    "origin": "Problem",
+    "incidents_30d": 0,
+    "planned_start": "2026-10-06T10:00",
+    "planned_hours": 2,
+    "systems_affected": 1,
+    "downtime": False,
+    "emergency": False,
+    "cab_required": False,
     "rollback_plan_exists": "Yes",
     "rollback_plan_tested": "Yes",
     "schedule_conflict": "No",
@@ -53,12 +61,11 @@ def fake_pipeline(monkeypatch):
 
     seen = {}
 
-    def fake_assess_change(change):
+    def fake_assess_ticket(change):
         seen["change"] = change
         return {
             "ml_prediction": {"risk_probability": 0.1, "risk_level": "Low"},
             "similar_changes": [],
-            "historical_context": {},
             "evidence": {},
             "policy": {
                 "recommendation": seen.get("recommendation", "APPROVE"),
@@ -69,7 +76,7 @@ def fake_pipeline(monkeypatch):
             "assessment": "JUSTIFICATION: Test justification.",
         }
 
-    monkeypatch.setattr(main, "assess_change", fake_assess_change)
+    monkeypatch.setattr(main, "assess_ticket", fake_assess_ticket)
     return seen
 
 
@@ -263,3 +270,60 @@ def test_admin_can_create_and_delete_users(client):
 
     assert client.delete(f"/api/admin/users/{new_name}", headers=headers).status_code == 200
     assert client.delete(f"/api/admin/users/{admin}", headers=headers).status_code == 400
+
+
+# -------------------------------------------------------------------
+# Real-data endpoints
+# -------------------------------------------------------------------
+
+def test_form_options_come_from_real_data(client):
+    _, headers = make_user("reviewer")
+
+    options = client.get("/api/form-options", headers=headers).json()
+
+    assert "Windows Server" in options["ci_subtype_by_type"]["computer"]
+    assert "Release Type" in options["change_family"]
+
+
+def test_ticket_with_mismatched_subtype_is_rejected(client, fake_pipeline):
+    _, headers = make_user("reviewer")
+
+    payload = {**CHANGE, "ci_type": "computer", "ci_subtype": "Firewall"}
+
+    assert client.post("/api/assess", json=payload, headers=headers).status_code == 422
+
+
+def test_code_assessment_refetches_diff_server_side(client, monkeypatch):
+    _, headers = make_user("reviewer")
+    fetched = []
+
+    analysis = {
+        "system": "acme/api",
+        "change_type": "Deployment",
+        "description": "[Auto-analyzed] tiny fix",
+        "rollback_plan_exists": "No",
+        "rollback_plan_tested": "None",
+        "code_metrics": {"la": 3, "ld": 1, "nf": 1, "nd": 1, "ns": 1, "ent": 0.0},
+        "analysis": {"author": "dev", "touches_tests": True, "detected_rollback_language": False},
+    }
+
+    def fake_analyze(url):
+        fetched.append(url)
+        return analysis
+
+    monkeypatch.setattr(main, "analyze_github_url", fake_analyze)
+    monkeypatch.delenv("GROQ_API_KEY", raising=False)
+
+    url = "https://github.com/acme/api/commit/abc1234"
+    resp = client.post("/api/assess-code", json={"url": url}, headers=headers)
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert fetched == [url]
+    assert body["kind"] == "code"
+    assert body["code_metrics"]["la"] == 3
+    assert body["recommendation"] == "APPROVE"
+
+    saved = client.get(f"/api/assessments/{body['id']}", headers=headers).json()
+    assert saved["assessment_type"] == "code"
+    assert saved["change_type"] == "Code change"

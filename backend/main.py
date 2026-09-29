@@ -3,9 +3,9 @@
 import json
 import logging
 import os
-import re
 import sys
 import threading
+from datetime import datetime
 from pathlib import Path
 from typing import Literal
 
@@ -22,10 +22,13 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 
 from agent_graph import assess_change_autonomous
-from agent import assess_change
+from agent import assess_code, assess_ticket
+from ticket_risk import load_stats
 from config import CORS_ORIGINS, APP_VERSION, METRICS_PATH
 from document_verification import verify_rollback_document
 from repo_change_analysis import RepoChangeError, analyze_github_url
+
+from backend.records import record_assessment
 
 from backend.auth import (
     ACCESS_TOKEN_EXPIRE_MINUTES,
@@ -39,7 +42,6 @@ from backend.database import (
     create_user,
     delete_user,
     list_users,
-    save_assessment,
     get_all_assessments,
     get_stats,
     get_assessment_by_id,
@@ -346,69 +348,83 @@ def current_user(
     return current_user
 
 
-class ChangeRequest(BaseModel):
-    """Validated change request received from the frontend."""
+YesNo = Literal["Yes", "No"]
 
-    system: str = Field(
-        min_length=1,
-        max_length=100,
-    )
 
-    change_type: Literal[
-        "Config-Update",
-        "Database-Schema-Change",
-        "Deployment",
-        "Infrastructure-Change",
-        "Patch",
-        "Security-Patch",
+class TicketRequest(BaseModel):
+    """An ITIL change ticket, using the fields of the real Rabobank
+    change records the ticket model was trained on."""
+
+    title: str = Field(min_length=1, max_length=150)
+
+    ci_type: str = Field(min_length=1, max_length=60)
+
+    ci_subtype: str = Field(min_length=1, max_length=80)
+
+    change_family: str = Field(min_length=1, max_length=60)
+
+    risk_classification: Literal[
+        "Minor Change",
+        "Business Change",
+        "Major Business Change",
     ]
 
-    change_size: Literal[
-        "Small",
-        "Medium",
-        "Large",
-    ]
+    origin: Literal["Problem", "Incident"] = "Problem"
 
-    requester_team: str = Field(
-        min_length=1,
-        max_length=100,
-    )
+    incidents_30d: int = Field(ge=0, le=10000)
 
-    requested_window: Literal[
-        "Business-Hours-Weekday",
-        "Off-Hours-Weekday",
-        "Peak-Hours",
-        "Weekend",
-    ]
+    planned_start: datetime
 
-    rollback_plan_exists: Literal[
-        "Yes",
-        "No",
-    ]
+    planned_hours: float = Field(gt=0, le=2160)
 
-    rollback_plan_tested: Literal[
-        "Yes",
-        "No",
-        "None",
-    ] = "None"
+    systems_affected: int = Field(ge=1, le=1000)
 
-    schedule_conflict: Literal[
-        "Yes",
-        "No",
-    ]
+    downtime: bool = False
 
-    description: str = Field(
-        default="",
-        max_length=2000,
-    )
+    emergency: bool = False
+
+    cab_required: bool = False
+
+    rollback_plan_exists: YesNo
+
+    rollback_plan_tested: Literal["Yes", "No", "None"] = "None"
+
+    schedule_conflict: YesNo = "No"
+
+    description: str = Field(default="", max_length=2000)
 
     # ID returned by /api/documents/verify-rollback. The verification
     # result itself is looked up server-side - the client cannot claim
     # a document was verified.
-    rollback_document_id: str | None = Field(
-        default=None,
-        max_length=64,
-    )
+    rollback_document_id: str | None = Field(default=None, max_length=64)
+
+
+def validate_ticket_options(ticket: dict) -> None:
+    """Reject categories the model has never seen in real data."""
+
+    options = load_stats()["options"]
+
+    if ticket["ci_type"] not in options["ci_type"]:
+        raise HTTPException(status_code=422, detail=f"Unknown system type: {ticket['ci_type']}")
+
+    if ticket["ci_subtype"] not in options["ci_subtype_by_type"].get(ticket["ci_type"], []):
+        raise HTTPException(
+            status_code=422,
+            detail=f"'{ticket['ci_subtype']}' is not a subtype of '{ticket['ci_type']}'.",
+        )
+
+    if ticket["change_family"] not in options["change_family"]:
+        raise HTTPException(status_code=422, detail=f"Unknown change type: {ticket['change_family']}")
+
+
+class CodeAssessRequest(BaseModel):
+    """A GitHub commit / pull request to assess, plus deployment context."""
+
+    url: str = Field(min_length=1, max_length=500)
+
+    schedule_conflict: YesNo = "No"
+
+    rollback_document_id: str | None = Field(default=None, max_length=64)
 
 
 def attach_document_evidence(
@@ -440,32 +456,6 @@ def attach_document_evidence(
     change["rollback_document_filename"] = record["filename"]
 
     return change
-
-
-def parse_assessment(text: str):
-    """Extract generated recommendation, risk level and justification."""
-
-    rec = re.search(
-        r"RECOMMENDATION:\s*(\w+)",
-        text,
-    )
-
-    lvl = re.search(
-        r"RISK LEVEL:\s*(\w+)",
-        text,
-    )
-
-    jus = re.search(
-        r"JUSTIFICATION:\s*(.+)",
-        text,
-        re.S,
-    )
-
-    return (
-        rec.group(1) if rec else "REVIEW",
-        lvl.group(1) if lvl else "Medium",
-        jus.group(1).strip() if jus else text,
-    )
 
 
 MAX_DOCUMENT_BYTES = 5 * 1024 * 1024  # 5MB
@@ -560,232 +550,121 @@ class RepoChangeRequest(BaseModel):
     )
 
 
+def fetch_github_analysis(url: str, current_user: dict) -> dict:
+    """Fetch and analyse a GitHub commit/PR, mapping failures to HTTP errors."""
+
+    logger.info("Analyzing GitHub change | user=%s | url=%s", current_user["username"], url)
+
+    try:
+        return analyze_github_url(url)
+
+    except RepoChangeError as err:
+        raise HTTPException(status_code=400, detail=str(err))
+
+    except Exception:
+        logger.exception("Failed to analyze GitHub change | url=%s", url)
+
+        raise HTTPException(
+            status_code=502,
+            detail="Could not reach GitHub or parse this change. Check the URL and try again.",
+        )
+
+
 @app.post("/api/analyze-repo-change")
 def analyze_repo_change(
     req: RepoChangeRequest,
     current_user: dict = Depends(get_current_user),
 ):
-    """Fetch a real GitHub commit/PR and derive assessment fields from it.
+    """Preview what ChangeGuard reads from a real GitHub commit/PR.
 
-    Deterministic heuristics over file paths, commit text, and diff
-    stats (src/repo_change_analysis.py) - not an AI judgment call. The
-    result pre-fills the same assessment form a human would fill in by
-    hand; nothing here skips review or runs the risk pipeline itself.
+    Deterministic analysis of file paths, commit text and diff stats
+    (src/repo_change_analysis.py), including the change metrics the
+    code-risk model uses. Nothing is scored or saved here.
     """
 
-    logger.info(
-        "Analyzing GitHub change | user=%s | url=%s",
-        current_user["username"],
-        req.url,
-    )
+    return fetch_github_analysis(req.url, current_user)
 
-    try:
-        result = analyze_github_url(req.url)
 
-    except RepoChangeError as err:
-        raise HTTPException(
-            status_code=400,
-            detail=str(err),
-        )
+@app.get("/api/form-options")
+def form_options(
+    current_user: dict = Depends(get_current_user),
+):
+    """Real categories from the training data, for the ticket form."""
 
-    except Exception:
-        logger.exception(
-            "Failed to analyze GitHub change | url=%s",
-            req.url,
-        )
-
-        raise HTTPException(
-            status_code=502,
-            detail=(
-                "Could not reach GitHub or parse this change. "
-                "Check the URL and try again."
-            ),
-        )
-
-    logger.info(
-        "GitHub change analyzed | user=%s | repo=%s | change_type=%s | "
-        "change_size=%s",
-        current_user["username"],
-        result["system"],
-        result["change_type"],
-        result["change_size"],
-    )
-
-    return result
+    return load_stats()["options"]
 
 
 @app.post("/api/assess")
 def assess(
-    req: ChangeRequest,
+    req: TicketRequest,
     current_user: dict = Depends(get_current_user),
 ):
-    """Run the controlled ChangeGuard assessment pipeline."""
+    """Assess a change ticket with the controlled pipeline."""
 
-    change = attach_document_evidence(req.model_dump(), current_user)
+    ticket = req.model_dump(mode="json")
+    validate_ticket_options(ticket)
+    ticket = attach_document_evidence(ticket, current_user)
 
-    logger.info(
-        "Starting controlled assessment | user=%s | system=%s | change_type=%s",
-        current_user["username"],
-        change["system"],
-        change["change_type"],
-    )
+    result = assess_ticket(ticket)
 
-    result = assess_change(change)
-
-    policy = result["policy"]
-
-    rec = policy["recommendation"]
-    lvl = policy["risk_level"]
-
-    logger.info(
-        "Controlled assessment decision | user=%s | recommendation=%s | risk_level=%s",
-        current_user["username"],
-        rec,
-        lvl,
-    )
-
-    _, _, jus = parse_assessment(
-        result["assessment"]
-    )
-
-    details = {
-        "mode": "controlled",
-        "user": {
-            "username": current_user["username"],
-            "role": current_user["role"],
-        },
-        "change": change,
-        "ml_prediction": result["ml_prediction"],
-        "similar_changes": result["similar_changes"],
-        "historical_context": result.get(
-            "historical_context"
-        ),
-        "evidence": result["evidence"],
-        "policy": policy,
-        "explanation_source": result["explanation_source"],
-        "recommendation": rec,
-        "risk_level": lvl,
-        "justification": jus,
-    }
-
-    new_id = save_assessment(
-        change,
-        result["ml_prediction"],
-        rec,
-        lvl,
-        jus,
-        details=details,
-    )
-
-    logger.info(
-        "Controlled assessment saved | assessment_id=%s | user=%s",
-        new_id,
-        current_user["username"],
-    )
-
-    return {
-        "id": new_id,
-        "ml_prediction": result["ml_prediction"],
-        "similar_changes": result["similar_changes"],
-        "evidence": result["evidence"],
-        "policy": policy,
-        "explanation_source": result["explanation_source"],
-        "recommendation": rec,
-        "risk_level": lvl,
-        "justification": jus,
-    }
+    return record_assessment("ticket", "controlled", ticket, result, result["assessment"], current_user)
 
 
 @app.post("/api/assess-autonomous")
 def assess_autonomous(
-    req: ChangeRequest,
+    req: TicketRequest,
     current_user: dict = Depends(require_admin),
 ):
-    """Run the autonomous LangGraph ChangeGuard assessment."""
+    """Assess a change ticket with the autonomous LangGraph agent."""
 
-    change = attach_document_evidence(req.model_dump(), current_user)
+    ticket = req.model_dump(mode="json")
+    validate_ticket_options(ticket)
+    ticket = attach_document_evidence(ticket, current_user)
 
-    logger.info(
-        "Starting autonomous assessment | user=%s | system=%s | change_type=%s",
-        current_user["username"],
-        change["system"],
-        change["change_type"],
+    result = assess_change_autonomous(ticket)
+
+    return record_assessment(
+        "ticket",
+        "autonomous",
+        ticket,
+        result,
+        result["final_answer"],
+        current_user,
+        extra={"tools_called": result["tools_called"], "num_tool_calls": result["num_tool_calls"]},
     )
 
-    result = assess_change_autonomous(change)
 
-    policy = result["policy"]
+@app.post("/api/assess-code")
+def assess_code_change(
+    req: CodeAssessRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    """Assess a real GitHub commit / pull request with the code-risk model.
 
-    rec = policy["recommendation"]
-    lvl = policy["risk_level"]
+    The diff is re-fetched server-side, so the metrics that are scored
+    and audited always come from GitHub, never from the client.
+    """
 
-    logger.info(
-        "Autonomous assessment decision | user=%s | recommendation=%s | risk_level=%s | tool_calls=%s",
-        current_user["username"],
-        rec,
-        lvl,
-        result["num_tool_calls"],
+    analysis = fetch_github_analysis(req.url, current_user)
+
+    context = attach_document_evidence(
+        {"rollback_document_id": req.rollback_document_id, "schedule_conflict": req.schedule_conflict},
+        current_user,
     )
 
-    _, _, jus = parse_assessment(
-        result["final_answer"]
-    )
+    result = assess_code(analysis, context)
 
-    ml_prediction = result["ml_prediction"]
+    change = {**result["change"], "url": req.url}
 
-    details = {
-        "mode": "autonomous",
-        "user": {
-            "username": current_user["username"],
-            "role": current_user["role"],
-        },
-        "change": change,
-        "ml_prediction": ml_prediction,
-        "historical_context": result.get(
-            "historical_context"
-        ),
-        "similar_changes": result.get(
-            "similar_changes"
-        ),
-        "schedule": result.get(
-            "schedule"
-        ),
-        "policy": policy,
-        "explanation_source": result["explanation_source"],
-        "recommendation": rec,
-        "risk_level": lvl,
-        "justification": jus,
-        "tools_called": result["tools_called"],
-        "num_tool_calls": result["num_tool_calls"],
-    }
-
-    new_id = save_assessment(
+    return record_assessment(
+        "code",
+        "controlled",
         change,
-        ml_prediction,
-        rec,
-        lvl,
-        jus,
-        details=details,
+        result,
+        result["assessment"],
+        current_user,
+        extra={"code_metrics": result["code_metrics"], "analysis": result["analysis"]},
     )
-
-    logger.info(
-        "Autonomous assessment saved | assessment_id=%s | user=%s",
-        new_id,
-        current_user["username"],
-    )
-
-    return {
-        "id": new_id,
-        "ml_prediction": ml_prediction,
-        "similar_changes": result.get("similar_changes"),
-        "policy": policy,
-        "explanation_source": result["explanation_source"],
-        "recommendation": rec,
-        "risk_level": lvl,
-        "justification": jus,
-        "tools_called": result["tools_called"],
-        "num_tool_calls": result["num_tool_calls"],
-    }
 
 
 @app.get("/api/history")

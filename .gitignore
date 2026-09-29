@@ -12,3 +12,6 @@ web/node_modules/
 frontend_dist/
 
 *.whl
+
+# Downloaded public datasets (re-download with scripts)
+data/raw/

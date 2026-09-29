@@ -1,7 +1,14 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { api } from "../api";
 import Badge from "../components/Badge";
 import AssessmentDetailModal from "../components/AssessmentDetailModal";
+import {
+  RiskGauge,
+  FactorBars,
+  SimilarList,
+  EvidenceGrid,
+  SectionTitle,
+} from "../components/RiskInsights";
 import {
   Cpu,
   Sparkles,
@@ -14,292 +21,259 @@ import {
   XCircle,
   GitPullRequest,
   Search,
+  ClipboardList,
+  BarChart3,
+  Layers,
+  FileSearch,
 } from "lucide-react";
 
-const SYSTEMS = [
-  "Payments-Service",
-  "Auth-Service",
-  "Billing-DB",
-  "Inventory-API",
-  "Website-Frontend",
-  "Search-Service",
-  "Notification-Service",
-  "Reporting-DB",
-];
-
-const CHANGE_TYPES = [
-  "Config-Update",
-  "Deployment",
-  "Patch",
-  "Security-Patch",
-  "Infrastructure-Change",
-  "Database-Schema-Change",
-];
-
-const SIZES = ["Small", "Medium", "Large"];
-
-const TEAMS = [
-  "DevOps",
-  "Platform",
-  "Security",
-  "Data-Engineering",
-  "Backend",
-  "SRE",
-];
-
-const WINDOWS = [
-  "Off-Hours-Weekday",
-  "Weekend",
-  "Business-Hours-Weekday",
-  "Peak-Hours",
-];
+/** Next date (as a datetime-local string) falling on weekday (Mon=0) and hour. */
+function nextSlot(weekday, hour) {
+  const d = new Date();
+  d.setHours(hour, 0, 0, 0);
+  const jsWeekday = (weekday + 1) % 7; // Monday=0 here, Monday=1 in JS
+  let add = (jsWeekday - d.getDay() + 7) % 7;
+  if (add === 0) add = 7;
+  d.setDate(d.getDate() + add);
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(hour)}:00`;
+}
 
 const PRESETS = {
-  highRisk: {
-    system: "Payments-Service",
-    change_type: "Database-Schema-Change",
-    change_size: "Large",
-    requester_team: "Backend",
-    requested_window: "Peak-Hours",
-    rollback_plan_exists: "No",
-    rollback_plan_tested: "None",
-    schedule_conflict: "Yes",
-    description:
-      "Adding new indexed transactions column to main payments DB during peak processing hours without tested rollback script.",
+  high: {
+    label: "Online banking release (Sat night)",
+    tone: "rose",
+    ticket: {
+      title: "Online banking web release 24.3",
+      ci_type: "application",
+      ci_subtype: "Web Based Application",
+      change_family: "Release Type",
+      risk_classification: "Major Business Change",
+      origin: "Incident",
+      incidents_30d: 18,
+      planned_start: nextSlot(5, 20),
+      planned_hours: 6,
+      systems_affected: 6,
+      downtime: true,
+      emergency: false,
+      cab_required: true,
+      rollback_plan_exists: "Yes",
+      rollback_plan_tested: "No",
+      schedule_conflict: "No",
+      description: "Quarterly release of the customer online-banking portal.",
+    },
   },
-
-  mediumRisk: {
-    system: "Auth-Service",
-    change_type: "Infrastructure-Change",
-    change_size: "Medium",
-    requester_team: "Platform",
-    requested_window: "Weekend",
-    rollback_plan_exists: "Yes",
-    rollback_plan_tested: "No",
-    schedule_conflict: "No",
-    description:
-      "Upgrading Kubernetes cluster node pool for Auth-Service over the weekend window.",
+  medium: {
+    label: "Core DB tuning (late evening)",
+    tone: "amber",
+    ticket: {
+      title: "Core DB instance parameter tuning",
+      ci_type: "database",
+      ci_subtype: "Instance",
+      change_family: "Standard Change Type",
+      risk_classification: "Business Change",
+      origin: "Problem",
+      incidents_30d: 3,
+      planned_start: nextSlot(3, 22),
+      planned_hours: 3,
+      systems_affected: 1,
+      downtime: true,
+      emergency: false,
+      cab_required: false,
+      rollback_plan_exists: "Yes",
+      rollback_plan_tested: "No",
+      schedule_conflict: "No",
+      description: "Increase buffer cache on the core accounts database instance.",
+    },
   },
-
-  lowRisk: {
-    system: "Website-Frontend",
-    change_type: "Security-Patch",
-    change_size: "Small",
-    requester_team: "DevOps",
-    requested_window: "Off-Hours-Weekday",
-    rollback_plan_exists: "Yes",
-    rollback_plan_tested: "Yes",
-    schedule_conflict: "No",
-    description:
-      "Routine patch update for static asset bundler during off-hours with tested automated rollback.",
+  low: {
+    label: "Windows server patching",
+    tone: "emerald",
+    ticket: {
+      title: "Patch Windows servers - monthly security update",
+      ci_type: "computer",
+      ci_subtype: "Windows Server",
+      change_family: "Standard Change Type",
+      risk_classification: "Minor Change",
+      origin: "Problem",
+      incidents_30d: 0,
+      planned_start: nextSlot(1, 10),
+      planned_hours: 2,
+      systems_affected: 4,
+      downtime: false,
+      emergency: false,
+      cab_required: false,
+      rollback_plan_exists: "Yes",
+      rollback_plan_tested: "Yes",
+      schedule_conflict: "No",
+      description: "Monthly OS security patches on the internal file-server cluster.",
+    },
   },
 };
 
-const DEFAULTS = PRESETS.lowRisk;
+const TICKET_STEPS = [
+  "Rabobank-trained risk model (LightGBM)",
+  "Explain the score (SHAP factors)",
+  "FAISS search: similar real changes",
+  "Incident, start-time & rollback evidence",
+  "Deterministic risk policy decides",
+  "LLM explains the decision",
+];
+
+const AGENT_STEPS = [
+  "Deterministic risk policy decides",
+  "LangGraph agent starts",
+  "Agent selects evidence tools",
+  "Agent writes evidence-cited justification",
+];
+
+const CODE_STEPS = [
+  "Fetch the real diff from GitHub",
+  "Compute change metrics (ApacheJIT definitions)",
+  "ApacheJIT-trained risk model (LightGBM)",
+  "FAISS search: similar real commits",
+  "Rollback & test readiness",
+  "Policy decides · LLM explains",
+];
+
+const TONES = {
+  rose: "bg-rose-50 hover:bg-rose-100 text-rose-700 border-rose-200",
+  amber: "bg-amber-50 hover:bg-amber-100 text-amber-700 border-amber-200",
+  emerald: "bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border-emerald-200",
+};
+
+const INPUT =
+  "w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition-all text-slate-800";
+
+const EMPTY_DOC = { name: null, checking: false, result: null, error: null, id: null };
 
 export default function NewAssessment() {
   const user = api.getStoredUser();
   const isAdmin = user?.role === "admin";
 
+  const [tab, setTab] = useState("ticket");
   const [mode, setMode] = useState("controlled");
-  const [form, setForm] = useState(DEFAULTS);
-  const [loading, setLoading] = useState(false);
-  const [result, setResult] = useState(null);
-  const [error, setError] = useState(null);
-  const [agentSteps, setAgentSteps] = useState([]);
-  const [currentStepIndex, setCurrentStepIndex] = useState(0);
-  const [fullModalItem, setFullModalItem] = useState(null);
-
-  const [docName, setDocName] = useState(null);
-  const [docChecking, setDocChecking] = useState(false);
-  const [docResult, setDocResult] = useState(null);
-  const [docError, setDocError] = useState(null);
+  const [options, setOptions] = useState(null);
+  const [ticket, setTicket] = useState(PRESETS.low.ticket);
 
   const [repoUrl, setRepoUrl] = useState("");
   const [repoAnalyzing, setRepoAnalyzing] = useState(false);
-  const [repoAnalysis, setRepoAnalysis] = useState(null);
+  const [repoPreview, setRepoPreview] = useState(null);
   const [repoError, setRepoError] = useState(null);
+  const [codeConflict, setCodeConflict] = useState("No");
 
-  function update(key, value) {
-    setForm((f) => ({
-      ...f,
-      [key]: value,
-    }));
+  const [doc, setDoc] = useState(EMPTY_DOC);
+
+  const [loading, setLoading] = useState(false);
+  const [steps, setSteps] = useState([]);
+  const [stepIndex, setStepIndex] = useState(0);
+  const [result, setResult] = useState(null);
+  const [error, setError] = useState(null);
+  const [modalItem, setModalItem] = useState(null);
+
+  useEffect(() => {
+    api.formOptions().then(setOptions).catch((e) => setError(e?.message));
+  }, []);
+
+  const update = (key, value) => setTicket((t) => ({ ...t, [key]: value }));
+
+  const subtypes = options?.ci_subtype_by_type?.[ticket.ci_type] || [];
+
+  function changeType(ciType) {
+    const first = options?.ci_subtype_by_type?.[ciType]?.[0] || "";
+    setTicket((t) => ({ ...t, ci_type: ciType, ci_subtype: first }));
   }
 
-  function applyPreset(presetKey) {
-    setForm(PRESETS[presetKey]);
+  function resetOutputs() {
     setResult(null);
     setError(null);
-    setDocName(null);
-    setDocResult(null);
-    setDocError(null);
+  }
+
+  function applyPreset(key) {
+    setTicket(PRESETS[key].ticket);
+    setDoc(EMPTY_DOC);
+    resetOutputs();
+  }
+
+  function switchTab(next) {
+    setTab(next);
+    setDoc(EMPTY_DOC);
+    resetOutputs();
+    if (next === "code") setMode("controlled");
   }
 
   async function handleDocumentUpload(e) {
     const file = e.target.files?.[0];
+    if (!file) return;
 
-    if (!file) {
-      return;
-    }
-
-    setDocName(file.name);
-    setDocChecking(true);
-    setDocResult(null);
-    setDocError(null);
+    setDoc({ ...EMPTY_DOC, name: file.name, checking: true });
 
     try {
       const verification = await api.verifyRollbackDocument(file);
-
-      setDocResult(verification);
-
-      setForm((f) => ({
-        ...f,
-        rollback_document_id: verification.verification_id,
-      }));
+      setDoc({ ...EMPTY_DOC, name: file.name, result: verification, id: verification.verification_id });
     } catch (err) {
-      setDocError(err?.message || "Could not verify this document.");
-
-      setForm((f) => ({
-        ...f,
-        rollback_document_id: null,
-      }));
-    } finally {
-      setDocChecking(false);
+      setDoc({ ...EMPTY_DOC, name: file.name, error: err?.message || "Could not verify this document." });
     }
   }
 
   async function handleAnalyzeRepo() {
-    if (!repoUrl.trim()) {
-      return;
-    }
+    if (!repoUrl.trim()) return;
 
     setRepoAnalyzing(true);
     setRepoError(null);
-    setRepoAnalysis(null);
+    setRepoPreview(null);
+    resetOutputs();
 
     try {
-      const data = await api.analyzeRepoChange(repoUrl.trim());
-      const { analysis, ...fields } = data;
-
-      setForm((f) => ({ ...f, ...fields }));
-      setRepoAnalysis(analysis);
-      setResult(null);
-      setError(null);
+      setRepoPreview(await api.analyzeRepoChange(repoUrl.trim()));
     } catch (err) {
-      setRepoError(
-        err?.message || "Could not analyze this GitHub URL."
-      );
+      setRepoError(err?.message || "Could not analyze this GitHub URL.");
     } finally {
       setRepoAnalyzing(false);
     }
   }
 
-  function clearDocument() {
-    setDocName(null);
-    setDocResult(null);
-    setDocError(null);
-
-    setForm((f) => ({
-      ...f,
-      rollback_document_id: null,
-    }));
-  }
-
-  function handleModeChange(nextMode) {
-    if (nextMode === "autonomous" && !isAdmin) {
-      setMode("controlled");
-      return;
-    }
-
-    setMode(nextMode);
-    setResult(null);
-    setError(null);
-  }
-
   async function submit() {
     setLoading(true);
-    setResult(null);
-    setError(null);
+    resetOutputs();
 
-    /*
-     * Backend authorization is authoritative.
-     * The frontend role check prevents reviewers from being offered
-     * the autonomous mode, while the API still enforces admin access.
-     */
-    if (mode === "autonomous" && !isAdmin) {
-      setError(
-        "Autonomous Agent access is restricted to administrators."
-      );
-      setLoading(false);
-      return;
-    }
+    const plan = tab === "code" ? CODE_STEPS : mode === "autonomous" ? AGENT_STEPS : TICKET_STEPS;
+    setSteps(plan);
+    setStepIndex(0);
 
-    const steps =
-      mode === "controlled"
-        ? [
-            "1. FAISS Retrieval of Similar Past Changes",
-            "2. Backend-Derived Historical Context",
-            "3. ML Risk Model Probability Scoring",
-            "4. Incident, Schedule & Rollback Evidence",
-            "5. Deterministic Risk Policy Decision",
-            "6. LLM Explanation of the Decision",
-          ]
-        : [
-            "1. Deterministic Risk Policy Decision",
-            "2. LangGraph Agent Initializing State",
-            "3. Agent Selecting Evidence Tools",
-            "4. Agent Writing Evidence-Cited Justification",
-          ];
-
-    setAgentSteps(steps);
-    setCurrentStepIndex(0);
-
-    // Simulate animated step progression for visual feedback.
+    // Visual progress only - the real pipeline runs in one request.
     const interval = setInterval(() => {
-      setCurrentStepIndex((prev) => {
-        if (prev < steps.length - 1) {
-          return prev + 1;
-        }
-
-        clearInterval(interval);
-        return prev;
-      });
-    }, 400);
+      setStepIndex((prev) => (prev < plan.length - 1 ? prev + 1 : prev));
+    }, 450);
 
     try {
       let data;
 
-      if (mode === "controlled") {
-        data = await api.assess(form);
-
-        setResult({
-          ...data,
-          mode: "controlled",
+      if (tab === "code") {
+        data = await api.assessCode({
+          url: repoUrl.trim(),
+          schedule_conflict: codeConflict,
+          rollback_document_id: doc.id,
         });
       } else {
-        data = await api.assessAutonomous(form);
-
-        setResult({
-          ...data,
-          mode: "autonomous",
-        });
+        const payload = {
+          ...ticket,
+          incidents_30d: Number(ticket.incidents_30d),
+          planned_hours: Number(ticket.planned_hours),
+          systems_affected: Number(ticket.systems_affected),
+          rollback_document_id: doc.id,
+        };
+        data = mode === "autonomous" ? await api.assessAutonomous(payload) : await api.assess(payload);
       }
+
+      setResult(data);
     } catch (e) {
-      if (e?.message === "Authentication required") {
-        return;
-      }
-
-      if (e?.message === "Administrator access required") {
-        setError(
-          "Autonomous Agent access is restricted to administrators."
-        );
-        return;
-      }
+      if (e?.message === "Authentication required") return;
 
       setError(
-        e?.message ||
-          "Could not reach the ChangeGuard engine backend. Ensure the server is running on port 7860."
+        e?.message === "Administrator access required"
+          ? "Autonomous Agent access is restricted to administrators."
+          : e?.message || "Could not reach the ChangeGuard backend."
       );
     } finally {
       clearInterval(interval);
@@ -307,532 +281,378 @@ export default function NewAssessment() {
     }
   }
 
-  const probPercent = result?.ml_prediction
-    ? Math.round(result.ml_prediction.risk_probability * 100)
-    : 0;
+  const canRun = tab === "ticket" ? Boolean(options) : Boolean(repoUrl.trim());
 
   return (
-    <div className="animate-in space-y-8 max-w-6xl">
+    <div className="animate-in space-y-6 max-w-6xl">
       {/* Header */}
       <div>
         <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-indigo-50 border border-indigo-200 text-indigo-700 text-xs font-semibold mb-2">
           <Sparkles className="w-3.5 h-3.5 text-indigo-600" />
-          Interactive Assessment Studio
+          Trained on real change history
         </div>
-
-        <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-slate-900">
-          Evaluate Change Risk
-        </h1>
-
+        <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-slate-900">Evaluate Change Risk</h1>
         <p className="text-slate-500 text-sm mt-1">
-          Submit a proposed change request for evidence-grounded risk
-          classification.
+          Change tickets are scored by a model trained on 26,000 real Rabobank ITIL changes; code changes by a
+          model trained on 106,000 real Apache commits.
         </p>
       </div>
 
-      {/* Analyze a Real GitHub Change */}
-      <div className="bg-white p-4 rounded-2xl border border-slate-200/80 shadow-xs space-y-3">
-        <div className="flex items-center gap-1.5 text-xs font-bold text-slate-500 uppercase tracking-wider">
-          <GitPullRequest className="w-4 h-4 text-slate-700" />
-          Analyze a Real GitHub Change (optional)
-        </div>
-
-        <p className="text-xs text-slate-500 -mt-1">
-          Paste a public GitHub commit or pull request link. ChangeGuard
-          fetches the real diff, derives the change type, size, and
-          rollback signals from it, and pre-fills the form below for you
-          to review before running the assessment.
-        </p>
-
-        <div className="flex flex-col sm:flex-row gap-2">
-          <input
-            type="text"
-            value={repoUrl}
-            onChange={(e) => setRepoUrl(e.target.value)}
-            placeholder="https://github.com/owner/repo/commit/... or /pull/123"
-            className="flex-1 px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition-all text-slate-800"
-          />
-
+      {/* Tabs */}
+      <div className="grid grid-cols-2 gap-2 p-1.5 bg-slate-100/80 rounded-2xl border border-slate-200/60 max-w-xl">
+        {[
+          { key: "ticket", icon: ClipboardList, title: "Change ticket", sub: "ITIL / CAB request" },
+          { key: "code", icon: GitPullRequest, title: "Code change", sub: "GitHub commit or PR" },
+        ].map(({ key, icon: Icon, title, sub }) => (
           <button
+            key={key}
             type="button"
-            onClick={handleAnalyzeRepo}
-            disabled={repoAnalyzing || !repoUrl.trim()}
-            className="px-4 py-2.5 rounded-xl text-sm font-semibold bg-slate-900 hover:bg-slate-800 disabled:opacity-50 text-white transition-colors flex items-center justify-center gap-2 cursor-pointer"
+            onClick={() => switchTab(key)}
+            className={`px-4 py-2.5 rounded-xl text-left flex items-center gap-3 transition-all ${
+              tab === key ? "bg-white shadow-md ring-1 ring-slate-200 text-indigo-900" : "text-slate-500 hover:text-slate-800"
+            }`}
           >
-            {repoAnalyzing ? (
-              <>
-                <span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full spinner"></span>
-                Analyzing...
-              </>
-            ) : (
-              <>
-                <Search className="w-3.5 h-3.5" />
-                Analyze
-              </>
-            )}
+            <Icon className={`w-5 h-5 ${tab === key ? "text-indigo-600" : ""}`} />
+            <span>
+              <span className="block text-sm font-bold">{title}</span>
+              <span className="block text-[11px] font-normal text-slate-500">{sub}</span>
+            </span>
           </button>
-        </div>
-
-        {repoError && (
-          <p className="text-xs text-rose-600 font-medium">{repoError}</p>
-        )}
-
-        {repoAnalysis && (
-          <div className="p-3.5 bg-emerald-50 border border-emerald-200 rounded-xl text-xs text-emerald-800 space-y-1">
-            <p className="font-semibold flex items-center gap-1.5">
-              <CheckCircle2 className="w-3.5 h-3.5" />
-              Detected {repoAnalysis.files_changed} file(s) changed, +
-              {repoAnalysis.additions}/-{repoAnalysis.deletions} lines by{" "}
-              {repoAnalysis.author}. Fields below have been pre-filled —
-              review and adjust before running the assessment.
-            </p>
-            <p className="text-emerald-700">
-              Rollback language detected:{" "}
-              {repoAnalysis.detected_rollback_language ? "Yes" : "No"} ·
-              Test files touched:{" "}
-              {repoAnalysis.touches_tests ? "Yes" : "No"}
-            </p>
-          </div>
-        )}
+        ))}
       </div>
 
-      {/* Preset Buttons */}
-      <div className="bg-white p-4 rounded-2xl border border-slate-200/80 shadow-xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-        <div className="text-xs font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1.5">
-          <Zap className="w-4 h-4 text-amber-500" />
-          Quick Scenario Presets:
-        </div>
-
-        <div className="flex flex-wrap gap-2">
-          <button
-            onClick={() => applyPreset("highRisk")}
-            className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 transition-colors flex items-center gap-1.5"
-          >
-            <span className="w-2 h-2 rounded-full bg-rose-600 animate-pulse"></span>
-            High Risk DB Migration
-          </button>
-
-          <button
-            onClick={() => applyPreset("mediumRisk")}
-            className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-200 transition-colors flex items-center gap-1.5"
-          >
-            <span className="w-2 h-2 rounded-full bg-amber-500"></span>
-            Infra Upgrade (Weekend)
-          </button>
-
-          <button
-            onClick={() => applyPreset("lowRisk")}
-            className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 transition-colors flex items-center gap-1.5"
-          >
-            <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
-            Routine Security Patch
-          </button>
-        </div>
-      </div>
-
-      {/* Main Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
-        {/* Form Column */}
+        {/* Form column */}
         <div className="lg:col-span-2 bg-white rounded-2xl border border-slate-200/80 shadow-xs p-6 space-y-6">
-          {/* Agent Mode Toggle */}
-          <div>
-            <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">
-              Select Reasoning Mode
-            </label>
+          {tab === "ticket" ? (
+            <>
+              {/* Presets */}
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="text-xs font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1.5">
+                  <Zap className="w-4 h-4 text-amber-500" />
+                  Example tickets
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {Object.entries(PRESETS).map(([key, p]) => (
+                    <button
+                      key={key}
+                      type="button"
+                      onClick={() => applyPreset(key)}
+                      className={`text-xs font-semibold px-3 py-1.5 rounded-lg border transition-colors ${TONES[p.tone]}`}
+                    >
+                      {p.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
 
-            <div
-              className={`grid ${
-                isAdmin ? "grid-cols-2" : "grid-cols-1"
-              } gap-3 p-1.5 bg-slate-100/80 rounded-xl border border-slate-200/60`}
-            >
-              {/* Controlled */}
-              <button
-                type="button"
-                onClick={() => handleModeChange("controlled")}
-                className={`px-4 py-3 rounded-lg text-xs font-bold transition-all text-left flex flex-col gap-0.5 ${
-                  mode === "controlled"
-                    ? "bg-white text-indigo-900 shadow-md ring-1 ring-slate-200"
-                    : "text-slate-600 hover:text-slate-900"
-                }`}
-              >
-                <span className="flex items-center justify-between">
-                  Controlled Pipeline
-
-                  {mode === "controlled" && (
-                    <CheckCircle2 className="w-4 h-4 text-indigo-600" />
-                  )}
-                </span>
-
-                <span className="text-[11px] font-normal text-slate-500">
-                  Fixed sequence: RAG &rarr; ML &rarr; Tools &rarr; Policy &rarr; LLM
-                </span>
-              </button>
-
-              {/* Autonomous - Admin Only */}
+              {/* Mode - autonomous agent is admin-only */}
               {isAdmin && (
-                <button
-                  type="button"
-                  onClick={() => handleModeChange("autonomous")}
-                  className={`px-4 py-3 rounded-lg text-xs font-bold transition-all text-left flex flex-col gap-0.5 ${
-                    mode === "autonomous"
-                      ? "bg-white text-indigo-900 shadow-md ring-1 ring-slate-200"
-                      : "text-slate-600 hover:text-slate-900"
-                  }`}
-                >
-                  <span className="flex items-center justify-between">
-                    Autonomous Agent
-
-                    <span className="text-[9px] bg-gradient-to-r from-indigo-600 to-purple-600 text-white px-2 py-0.5 rounded-full font-extrabold">
-                      LANGGRAPH
-                    </span>
-                  </span>
-
-                  <span className="text-[11px] font-normal text-slate-500">
-                    LLM loop dynamically selects tool invocations
-                  </span>
-                </button>
+                <div className="grid grid-cols-2 gap-3 p-1.5 bg-slate-100/80 rounded-xl border border-slate-200/60">
+                  {[
+                    { key: "controlled", title: "Controlled pipeline", sub: "Model → evidence → policy → LLM" },
+                    { key: "autonomous", title: "Autonomous agent", sub: "LangGraph picks its own tools" },
+                  ].map(({ key, title, sub }) => (
+                    <button
+                      key={key}
+                      type="button"
+                      onClick={() => setMode(key)}
+                      className={`px-4 py-2.5 rounded-lg text-xs font-bold text-left ${
+                        mode === key ? "bg-white text-indigo-900 shadow-md ring-1 ring-slate-200" : "text-slate-600"
+                      }`}
+                    >
+                      <span className="flex items-center justify-between">
+                        {title}
+                        {mode === key && <CheckCircle2 className="w-4 h-4 text-indigo-600" />}
+                      </span>
+                      <span className="block text-[11px] font-normal text-slate-500">{sub}</span>
+                    </button>
+                  ))}
+                </div>
               )}
-            </div>
 
-            {!isAdmin && (
-              <p className="mt-2 text-[11px] text-slate-400">
-                Autonomous Agent mode is available to administrators only.
-              </p>
-            )}
-          </div>
+              {!options ? (
+                <p className="text-sm text-slate-400 animate-pulse">Loading real system types…</p>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <Field label="Change title" wide>
+                    <input className={INPUT} value={ticket.title} onChange={(e) => update("title", e.target.value)} />
+                  </Field>
 
-          {/* Form Fields */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <Field label="Target System">
-              <input
-                type="text"
-                list="system-suggestions"
-                value={form.system}
-                onChange={(e) => update("system", e.target.value)}
-                placeholder="e.g. Payments-Service or owner/repo"
-                className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition-all text-slate-800"
-              />
-              <datalist id="system-suggestions">
-                {SYSTEMS.map((s) => (
-                  <option key={s} value={s} />
-                ))}
-              </datalist>
-            </Field>
+                  <Field label="System type">
+                    <Select value={ticket.ci_type} onChange={changeType} options={options.ci_type} />
+                  </Field>
+                  <Field label="System subtype">
+                    <Select value={ticket.ci_subtype} onChange={(v) => update("ci_subtype", v)} options={subtypes} />
+                  </Field>
 
-            <Field label="Change Type">
-              <Select
-                value={form.change_type}
-                onChange={(v) => update("change_type", v)}
-                options={CHANGE_TYPES}
-              />
-            </Field>
+                  <Field label="Change type">
+                    <Select value={ticket.change_family} onChange={(v) => update("change_family", v)} options={options.change_family} />
+                  </Field>
+                  <Field label="Risk classification">
+                    <Select value={ticket.risk_classification} onChange={(v) => update("risk_classification", v)} options={options.risk_classification} />
+                  </Field>
 
-            <Field label="Scope & Size">
-              <Select
-                value={form.change_size}
-                onChange={(v) => update("change_size", v)}
-                options={SIZES}
-              />
-            </Field>
+                  <Field label="Planned start">
+                    <input type="datetime-local" className={INPUT} value={ticket.planned_start} onChange={(e) => update("planned_start", e.target.value)} />
+                  </Field>
+                  <Field label="Planned duration (hours)">
+                    <input type="number" min="0.25" step="0.25" className={INPUT} value={ticket.planned_hours} onChange={(e) => update("planned_hours", e.target.value)} />
+                  </Field>
 
-            <Field label="Requester Team">
-              <Select
-                value={form.requester_team}
-                onChange={(v) => update("requester_team", v)}
-                options={TEAMS}
-              />
-            </Field>
+                  <Field label="Incidents on this system (last 30 days)">
+                    <input type="number" min="0" className={INPUT} value={ticket.incidents_30d} onChange={(e) => update("incidents_30d", e.target.value)} />
+                  </Field>
+                  <Field label="Systems affected">
+                    <input type="number" min="1" className={INPUT} value={ticket.systems_affected} onChange={(e) => update("systems_affected", e.target.value)} />
+                  </Field>
 
-            <Field label="Deployment Window">
-              <Select
-                value={form.requested_window}
-                onChange={(v) => update("requested_window", v)}
-                options={WINDOWS}
-              />
-            </Field>
+                  <Field label="Raised from">
+                    <Select value={ticket.origin} onChange={(v) => update("origin", v)} options={options.origin} />
+                  </Field>
+                  <Field label="Schedule conflict reported">
+                    <Select value={ticket.schedule_conflict} onChange={(v) => update("schedule_conflict", v)} options={["No", "Yes"]} />
+                  </Field>
 
-            <Field label="Rollback Plan Exists">
-              <Select
-                value={form.rollback_plan_exists}
-                onChange={(v) => update("rollback_plan_exists", v)}
-                options={["Yes", "No"]}
-              />
-            </Field>
+                  <Field label="Rollback plan exists">
+                    <Select value={ticket.rollback_plan_exists} onChange={(v) => update("rollback_plan_exists", v)} options={["Yes", "No"]} />
+                  </Field>
+                  <Field label="Rollback plan tested">
+                    <Select value={ticket.rollback_plan_tested} onChange={(v) => update("rollback_plan_tested", v)} options={["Yes", "No", "None"]} />
+                  </Field>
 
-            <Field label="Rollback Plan Tested">
-              <Select
-                value={form.rollback_plan_tested}
-                onChange={(v) => update("rollback_plan_tested", v)}
-                options={["Yes", "No", "None"]}
-              />
-            </Field>
+                  <div className="sm:col-span-2 flex flex-wrap gap-5">
+                    <Toggle label="Scheduled downtime" checked={ticket.downtime} onChange={(v) => update("downtime", v)} />
+                    <Toggle label="Emergency change" checked={ticket.emergency} onChange={(v) => update("emergency", v)} />
+                    <Toggle label="CAB approval required" checked={ticket.cab_required} onChange={(v) => update("cab_required", v)} />
+                  </div>
 
-            <Field label="Schedule Conflict Flag">
-              <Select
-                value={form.schedule_conflict}
-                onChange={(v) => update("schedule_conflict", v)}
-                options={["No", "Yes"]}
-              />
-            </Field>
-          </div>
+                  <Field label="Description" wide>
+                    <textarea rows={2} className={INPUT} value={ticket.description} onChange={(e) => update("description", e.target.value)} />
+                  </Field>
+                </div>
+              )}
+            </>
+          ) : (
+            <>
+              <div className="space-y-2">
+                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider">
+                  Public GitHub commit or pull request
+                </label>
+                <div className="flex flex-col sm:flex-row gap-2">
+                  <input
+                    className={`${INPUT} flex-1`}
+                    value={repoUrl}
+                    onChange={(e) => {
+                      setRepoUrl(e.target.value);
+                      setRepoPreview(null);
+                    }}
+                    placeholder="https://github.com/owner/repo/commit/… or /pull/123"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleAnalyzeRepo}
+                    disabled={repoAnalyzing || !repoUrl.trim()}
+                    className="px-4 py-2.5 rounded-xl text-sm font-semibold bg-slate-900 hover:bg-slate-800 disabled:opacity-50 text-white flex items-center justify-center gap-2"
+                  >
+                    {repoAnalyzing ? (
+                      <span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full spinner" />
+                    ) : (
+                      <Search className="w-3.5 h-3.5" />
+                    )}
+                    Preview diff
+                  </button>
+                </div>
+                {repoError && <p className="text-xs text-rose-600 font-medium">{repoError}</p>}
+              </div>
 
-          {/* Rollback Document Upload */}
-          <Field label="Rollback Plan Document (optional)">
+              {repoPreview && (
+                <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-3">
+                  <div className="text-xs text-slate-600">
+                    <span className="font-bold text-slate-900">{repoPreview.system}</span> · by{" "}
+                    {repoPreview.analysis.author} · {repoPreview.analysis.commit_message.split("\n")[0]}
+                  </div>
+                  <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
+                    {[
+                      ["Lines added", repoPreview.code_metrics.la],
+                      ["Lines deleted", repoPreview.code_metrics.ld],
+                      ["Files", repoPreview.code_metrics.nf],
+                      ["Directories", repoPreview.code_metrics.nd],
+                      ["Modules", repoPreview.code_metrics.ns],
+                      ["Spread", repoPreview.code_metrics.ent.toFixed(2)],
+                    ].map(([label, value]) => (
+                      <div key={label} className="bg-white rounded-lg border border-slate-200 p-2 text-center">
+                        <div className="text-base font-extrabold font-mono text-slate-900">{value}</div>
+                        <div className="text-[10px] text-slate-500">{label}</div>
+                      </div>
+                    ))}
+                  </div>
+                  <p className="text-[11px] text-slate-500">
+                    Detected: {repoPreview.change_type} · rollback / reverse-migration wording{" "}
+                    {repoPreview.analysis.detected_rollback_language ? "found" : "not found"} · test files{" "}
+                    {repoPreview.analysis.touches_tests ? "changed" : "not changed"}
+                  </p>
+                </div>
+              )}
+
+              <Field label="Deployment window conflicts with another change?">
+                <Select value={codeConflict} onChange={setCodeConflict} options={["No", "Yes"]} />
+              </Field>
+            </>
+          )}
+
+          {/* Rollback document (both tabs) */}
+          <Field label="Rollback plan document (optional)">
             <p className="text-xs text-slate-500 mb-2 -mt-0.5">
-              Upload the actual rollback runbook. It's checked for a
-              real, numbered procedure — a claimed rollback plan that
-              isn't backed by a real document raises the risk score.
+              Checked on the server for a real, numbered procedure. A claimed rollback plan that isn't backed by a
+              real document raises the risk score.
             </p>
 
-            {!docName ? (
+            {!doc.name ? (
               <label className="flex items-center justify-center gap-2 w-full px-4 py-3 border-2 border-dashed border-slate-300 rounded-xl text-sm text-slate-500 hover:border-indigo-400 hover:text-indigo-600 hover:bg-indigo-50/40 transition-colors cursor-pointer">
                 <Upload className="w-4 h-4" />
                 Choose a .txt, .md, or .pdf file
-                <input
-                  type="file"
-                  accept=".txt,.md,.pdf"
-                  className="hidden"
-                  onChange={handleDocumentUpload}
-                />
+                <input type="file" accept=".txt,.md,.pdf" className="hidden" onChange={handleDocumentUpload} />
               </label>
             ) : (
               <div
                 className={`flex items-center justify-between gap-3 px-4 py-3 rounded-xl border text-sm ${
-                  docChecking
+                  doc.checking
                     ? "bg-slate-50 border-slate-200 text-slate-500"
-                    : docResult?.verified
+                    : doc.result?.verified
                     ? "bg-emerald-50 border-emerald-200 text-emerald-800"
                     : "bg-rose-50 border-rose-200 text-rose-800"
                 }`}
               >
                 <div className="flex items-center gap-2 min-w-0">
                   <FileText className="w-4 h-4 flex-shrink-0" />
-                  <span className="truncate font-medium">{docName}</span>
+                  <span className="truncate font-medium">{doc.name}</span>
                 </div>
-
-                <div className="flex items-center gap-3 flex-shrink-0">
-                  {docChecking && (
-                    <span className="text-xs">Verifying…</span>
-                  )}
-
-                  {!docChecking && docResult && (
-                    <span className="text-xs font-semibold flex items-center gap-1">
-                      {docResult.verified ? (
-                        <>
-                          <CheckCircle2 className="w-3.5 h-3.5" />
-                          Verified
-                        </>
-                      ) : (
-                        <>
-                          <XCircle className="w-3.5 h-3.5" />
-                          Not substantiated
-                        </>
-                      )}
+                <div className="flex items-center gap-3 flex-shrink-0 text-xs font-semibold">
+                  {doc.checking && <span>Verifying…</span>}
+                  {!doc.checking && doc.result && (
+                    <span className="flex items-center gap-1">
+                      {doc.result.verified ? <CheckCircle2 className="w-3.5 h-3.5" /> : <XCircle className="w-3.5 h-3.5" />}
+                      {doc.result.verified ? "Verified" : "Not substantiated"}
                     </span>
                   )}
-
-                  {!docChecking && docError && (
-                    <span className="text-xs font-semibold">
-                      {docError}
-                    </span>
-                  )}
-
-                  <button
-                    type="button"
-                    onClick={clearDocument}
-                    className="text-xs underline text-slate-400 hover:text-slate-700"
-                  >
+                  {!doc.checking && doc.error && <span>{doc.error}</span>}
+                  <button type="button" onClick={() => setDoc(EMPTY_DOC)} className="underline text-slate-400 hover:text-slate-700 font-normal">
                     Remove
                   </button>
                 </div>
               </div>
             )}
 
-            {!docChecking && docResult && docResult.reasons?.length > 0 && (
+            {!doc.checking && doc.result?.reasons?.length > 0 && (
               <ul className="mt-2 text-xs text-slate-500 list-disc list-inside space-y-0.5">
-                {docResult.reasons.map((r, idx) => (
-                  <li key={idx}>{r}</li>
+                {doc.result.reasons.map((r) => (
+                  <li key={r}>{r}</li>
                 ))}
               </ul>
             )}
           </Field>
 
-          {/* Description */}
-          <Field label="Change Description & Technical Scope">
-            <textarea
-              rows={3}
-              value={form.description}
-              onChange={(e) => update("description", e.target.value)}
-              placeholder="Describe technical changes, schema modifications, affected dependencies..."
-              className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition-all text-slate-800"
-            />
-          </Field>
-
-          {/* Submit */}
           <button
             onClick={submit}
-            disabled={loading}
-            className="w-full bg-gradient-to-r from-indigo-600 via-indigo-700 to-purple-700 hover:from-indigo-700 hover:to-purple-800 disabled:opacity-50 text-white font-bold text-sm py-3.5 rounded-xl shadow-lg shadow-indigo-600/25 transition-all flex items-center justify-center gap-2 cursor-pointer"
+            disabled={loading || !canRun}
+            className="w-full bg-gradient-to-r from-indigo-600 via-indigo-700 to-purple-700 hover:from-indigo-700 hover:to-purple-800 disabled:opacity-50 text-white font-bold text-sm py-3.5 rounded-xl shadow-lg shadow-indigo-600/25 transition-all flex items-center justify-center gap-2"
           >
             {loading ? (
               <>
-                <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full spinner"></span>
-                Evaluating Change Risk...
+                <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full spinner" />
+                Assessing…
               </>
             ) : (
               <>
                 <Play className="w-4 h-4 fill-white" />
-                Run{" "}
-                {mode === "autonomous"
-                  ? "LangGraph Autonomous Agent"
-                  : "Risk Pipeline Assessment"}
+                {tab === "code" ? "Assess code change" : mode === "autonomous" ? "Run autonomous agent" : "Assess change ticket"}
               </>
             )}
           </button>
         </div>
 
-        {/* Live Execution Panel */}
-        <div className="bg-slate-900 text-white rounded-2xl p-6 shadow-xl border border-slate-800 space-y-6 sticky top-6">
+        {/* Execution monitor */}
+        <div className="bg-slate-900 text-white rounded-2xl p-6 shadow-xl border border-slate-800 space-y-5 lg:sticky lg:top-6">
           <div>
             <div className="flex items-center gap-2 text-indigo-400 text-xs font-mono font-bold uppercase tracking-wider mb-1">
               <Cpu className="w-4 h-4" />
-              Live Reasoning Engine
+              Pipeline
             </div>
-
-            <h3 className="font-extrabold text-lg text-white">
-              Execution Monitor
-            </h3>
+            <h3 className="font-extrabold text-lg">Execution Monitor</h3>
           </div>
 
           {!loading && !result && (
-            <div className="py-12 text-center text-xs text-slate-400 space-y-3">
-              <div className="w-12 h-12 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center mx-auto text-indigo-400">
-                <Play className="w-5 h-5" />
-              </div>
-
-              <p>
-                Click{" "}
-                <b className="text-slate-200">
-                  Run Risk Pipeline Assessment
-                </b>{" "}
-                to launch AI evaluation.
-              </p>
-            </div>
+            <p className="py-10 text-center text-xs text-slate-400">
+              {tab === "code"
+                ? "Paste a GitHub link, preview the diff, then assess it."
+                : "Pick an example or fill in the ticket, then assess it."}
+            </p>
           )}
 
           {loading && (
-            <div className="space-y-3">
-              <p className="text-xs text-indigo-300 font-semibold flex items-center gap-2">
-                <span className="w-2 h-2 rounded-full bg-indigo-400 animate-ping"></span>
-                Processing change parameters...
-              </p>
-
-              <div className="space-y-2">
-                {agentSteps.map((step, idx) => (
-                  <div
-                    key={idx}
-                    className={`p-3 rounded-xl border text-xs transition-all flex items-center gap-2.5 ${
-                      idx === currentStepIndex
-                        ? "bg-indigo-950/80 border-indigo-500/80 text-white font-semibold shadow-md shadow-indigo-500/10"
-                        : idx < currentStepIndex
-                        ? "bg-slate-800/40 border-slate-700/60 text-slate-400"
-                        : "bg-slate-950/40 border-slate-800/40 text-slate-600"
-                    }`}
-                  >
-                    {idx <= currentStepIndex ? (
-                      <CheckCircle2
-                        className={`w-4 h-4 flex-shrink-0 ${
-                          idx === currentStepIndex
-                            ? "text-indigo-400 animate-pulse"
-                            : "text-emerald-400"
-                        }`}
-                      />
-                    ) : (
-                      <span className="w-4 h-4 rounded-full border border-slate-700 flex-shrink-0"></span>
-                    )}
-
-                    <span>{step}</span>
-                  </div>
-                ))}
-              </div>
+            <div className="space-y-2">
+              {steps.map((step, idx) => (
+                <div
+                  key={step}
+                  className={`p-3 rounded-xl border text-xs flex items-center gap-2.5 ${
+                    idx === stepIndex
+                      ? "bg-indigo-950/80 border-indigo-500/80 font-semibold"
+                      : idx < stepIndex
+                      ? "bg-slate-800/40 border-slate-700/60 text-slate-400"
+                      : "bg-slate-950/40 border-slate-800/40 text-slate-600"
+                  }`}
+                >
+                  {idx <= stepIndex ? (
+                    <CheckCircle2 className={`w-4 h-4 ${idx === stepIndex ? "text-indigo-400 animate-pulse" : "text-emerald-400"}`} />
+                  ) : (
+                    <span className="w-4 h-4 rounded-full border border-slate-700" />
+                  )}
+                  {step}
+                </div>
+              ))}
+              <p className="text-[10px] text-slate-500 pt-1">Illustrative progress - the pipeline runs as one request.</p>
             </div>
           )}
 
           {result && !loading && (
-            <div className="space-y-4">
-              <div className="p-4 rounded-xl bg-slate-800/80 border border-slate-700/80 space-y-3">
-                <div className="flex items-center justify-between text-xs">
-                  <span className="text-slate-400">Status:</span>
-
-                  <span className="text-emerald-400 font-bold flex items-center gap-1">
-                    <CheckCircle2 className="w-3.5 h-3.5" />
-                    Completed
+            <div className="space-y-3 text-xs">
+              {[
+                ["Status", "Completed"],
+                ["Model", result.kind === "code" ? "ApacheJIT code model" : "Rabobank change model"],
+                ["Mode", result.mode],
+                ["Explanation", result.explanation_source === "llm" ? "LLM (Groq)" : "Rule-based fallback"],
+                ["CAB decision", "Pending"],
+              ].map(([k, v]) => (
+                <div key={k} className="flex justify-between gap-3 border-b border-slate-800 pb-2">
+                  <span className="text-slate-400">{k}</span>
+                  <span className={`font-mono ${k === "CAB decision" ? "text-amber-300" : k === "Status" ? "text-emerald-400" : "text-indigo-200"}`}>
+                    {v}
                   </span>
                 </div>
+              ))}
 
-                <div className="flex items-center justify-between text-xs border-t border-slate-700/60 pt-2">
-                  <span className="text-slate-400">Mode:</span>
-
-                  <span className="text-indigo-300 font-mono capitalize">
-                    {result.mode}
-                  </span>
+              {result.tools_called?.length > 0 && (
+                <div className="flex flex-wrap gap-1.5">
+                  {result.tools_called.map((t, i) => (
+                    <span key={`${t}-${i}`} className="font-mono text-[10px] bg-indigo-500/20 text-indigo-300 px-2 py-0.5 rounded">
+                      {t}
+                    </span>
+                  ))}
                 </div>
-
-                <div className="flex items-center justify-between text-xs border-t border-slate-700/60 pt-2">
-                  <span className="text-slate-400">Explanation:</span>
-
-                  <span className="text-indigo-300 font-mono">
-                    {result.explanation_source === "llm"
-                      ? "LLM (Groq)"
-                      : "Rule-based fallback"}
-                  </span>
-                </div>
-
-                <div className="flex items-center justify-between text-xs border-t border-slate-700/60 pt-2">
-                  <span className="text-slate-400">CAB decision:</span>
-
-                  <span className="text-amber-300 font-semibold">
-                    Pending
-                  </span>
-                </div>
-
-                {result.tools_called?.length > 0 && (
-                  <div className="border-t border-slate-700/60 pt-2">
-                    <p className="text-[11px] font-bold text-slate-400 uppercase mb-1.5">
-                      Tools Executed:
-                    </p>
-
-                    <div className="flex flex-wrap gap-1.5">
-                      {result.tools_called.map((t, idx) => (
-                        <span
-                          key={idx}
-                          className="font-mono text-[10px] bg-indigo-500/20 text-indigo-300 px-2 py-0.5 rounded border border-indigo-400/30"
-                        >
-                          {t}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
+              )}
 
               <button
-                onClick={() =>
-                  api
-                    .getAssessment(result.id)
-                    .then(setFullModalItem)
-                    .catch((e) => setError(e?.message))
-                }
-                className="w-full bg-slate-800 hover:bg-slate-700 text-white font-semibold text-xs py-2.5 rounded-xl border border-slate-700 transition-colors flex items-center justify-center gap-1.5"
+                onClick={() => api.getAssessment(result.id).then(setModalItem).catch((e) => setError(e?.message))}
+                className="w-full bg-slate-800 hover:bg-slate-700 font-semibold py-2.5 rounded-xl border border-slate-700"
               >
-                Open Full Assessment &amp; Record CAB Decision &rarr;
+                Open full assessment &amp; record CAB decision →
               </button>
             </div>
           )}
         </div>
       </div>
 
-      {/* Error Message */}
       {error && (
         <div className="bg-rose-50 border border-rose-200 text-rose-800 p-4 rounded-xl text-sm flex items-center gap-2">
           <AlertTriangle className="w-5 h-5 text-rose-600 flex-shrink-0" />
@@ -840,153 +660,70 @@ export default function NewAssessment() {
         </div>
       )}
 
-      {/* Result Section */}
-      {result && (
-        <div className="bg-white rounded-2xl border border-slate-200/80 shadow-lg p-7 space-y-6 animate-in">
-          {/* Header Bar */}
-          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 pb-5 border-b border-slate-100">
-            <div>
-              <span className="text-xs font-bold text-slate-400 uppercase tracking-wider block mb-1">
-                Assessment Outcome
-              </span>
+      {result && <ResultPanel result={result} />}
 
-              <div className="flex items-center gap-3">
-                <Badge value={result.recommendation} />
-                <Badge value={result.risk_level} />
-              </div>
-            </div>
-
-            {/* Gauge */}
-            {result.ml_prediction && (
-              <div className="bg-slate-50 px-4 py-2.5 rounded-xl border border-slate-200/60 flex items-center gap-4">
-                <div>
-                  <p className="text-[11px] font-semibold text-slate-400 uppercase">
-                    ML Failure Probability
-                  </p>
-
-                  <p
-                    className={`text-xl font-extrabold font-mono ${
-                      probPercent > 50
-                        ? "text-red-600"
-                        : probPercent > 25
-                        ? "text-amber-600"
-                        : "text-emerald-600"
-                    }`}
-                  >
-                    {probPercent}%
-                  </p>
-                </div>
-
-                <div className="w-24 h-2.5 bg-slate-200 rounded-full overflow-hidden">
-                  <div
-                    className={`h-full rounded-full ${
-                      probPercent > 50
-                        ? "bg-red-600"
-                        : probPercent > 25
-                        ? "bg-amber-500"
-                        : "bg-emerald-500"
-                    }`}
-                    style={{
-                      width: `${Math.max(probPercent, 5)}%`,
-                    }}
-                  ></div>
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* Justification */}
-          <div>
-            <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">
-              AI Risk Justification Narrative
-            </h4>
-
-            <div className="p-4 rounded-xl bg-slate-50 border border-slate-200/70 text-slate-800 text-sm leading-relaxed font-sans">
-              {result.justification}
-            </div>
-          </div>
-
-          {/* RAG Matches */}
-          {result.similar_changes &&
-            result.similar_changes.length > 0 && (
-              <div>
-                <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">
-                  FAISS RAG Similar Historical Changes
-                </h4>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                  {result.similar_changes.map((s, idx) => (
-                    <div
-                      key={idx}
-                      className="p-3.5 bg-slate-50 rounded-xl border border-slate-200/60 flex items-center justify-between text-xs"
-                    >
-                      <div>
-                        <span className="font-bold text-slate-900">
-                          {s.change_id}
-                        </span>{" "}
-                        &bull;{" "}
-                        <span className="text-slate-600">
-                          {s.change_type}
-                        </span>
-
-                        <span className="ml-2 font-mono text-[10px] bg-indigo-50 text-indigo-700 px-1.5 py-0.5 rounded font-semibold">
-                          {(s.similarity * 100).toFixed(0)}% match
-                        </span>
-                      </div>
-
-                      <Badge value={s.outcome} />
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-          {/* Evidence Details */}
-          {result.evidence && (
-            <div>
-              <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">
-                Gathered Tool Evidence Summary
-              </h4>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
-                {[
-                  result.evidence.incidents?.note,
-                  result.evidence.schedule?.note,
-                  result.evidence.rollback?.note,
-                  result.evidence.document?.note,
-                ]
-                  .filter(Boolean)
-                  .map((note, idx) => (
-                    <div
-                      key={idx}
-                      className="p-3.5 bg-slate-50 rounded-xl border border-slate-200/60 text-xs text-slate-700"
-                    >
-                      {note}
-                    </div>
-                  ))}
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Full Assessment Detail Modal */}
-      {fullModalItem && (
-        <AssessmentDetailModal
-          item={fullModalItem}
-          onClose={() => setFullModalItem(null)}
-        />
-      )}
+      {modalItem && <AssessmentDetailModal item={modalItem} onClose={() => setModalItem(null)} />}
     </div>
   );
 }
 
-function Field({ label, children }) {
+function ResultPanel({ result }) {
+  const ml = result.ml_prediction;
+
   return (
-    <div>
-      <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">
-        {label}
-      </label>
+    <div className="bg-white rounded-2xl border border-slate-200/80 shadow-lg p-7 space-y-7 animate-in">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-5 pb-5 border-b border-slate-100">
+        <div className="space-y-2">
+          <span className="text-xs font-bold text-slate-400 uppercase tracking-wider block">Recommendation</span>
+          <div className="flex items-center gap-3">
+            <Badge value={result.recommendation} />
+            <Badge value={result.risk_level} />
+          </div>
+          <p className="text-xs text-slate-500">
+            Policy score <span className="font-mono font-semibold text-slate-700">{result.policy.score}</span>{" "}
+            (REVIEW ≥ 0.30 · REJECT ≥ 0.55) - decided by the deterministic policy, not the LLM.
+          </p>
+        </div>
+        <RiskGauge ml={ml} />
+      </div>
+
+      <div>
+        <SectionTitle icon={FileSearch}>Justification</SectionTitle>
+        <div className="p-4 rounded-xl bg-slate-50 border border-slate-200/70 text-slate-800 text-sm leading-relaxed">
+          {result.justification}
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-7">
+        <div>
+          <SectionTitle icon={BarChart3} hint="SHAP contributions from the trained model for this exact change">
+            Why this score
+          </SectionTitle>
+          <FactorBars factors={ml.factors} />
+        </div>
+        <div>
+          <SectionTitle
+            icon={Layers}
+            hint={result.kind === "code" ? "Nearest of 106,674 real Apache commits" : "Nearest of ~26,000 real Rabobank changes"}
+          >
+            Similar real changes &amp; what happened
+          </SectionTitle>
+          <SimilarList similar={result.similar_changes} kind={result.kind} />
+        </div>
+      </div>
+
+      <div>
+        <SectionTitle>Evidence</SectionTitle>
+        <EvidenceGrid evidence={result.evidence} />
+      </div>
+    </div>
+  );
+}
+
+function Field({ label, children, wide }) {
+  return (
+    <div className={wide ? "sm:col-span-2" : ""}>
+      <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">{label}</label>
       {children}
     </div>
   );
@@ -994,16 +731,26 @@ function Field({ label, children }) {
 
 function Select({ value, onChange, options }) {
   return (
-    <select
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-      className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition-all text-slate-800 cursor-pointer"
-    >
+    <select value={value} onChange={(e) => onChange(e.target.value)} className={`${INPUT} cursor-pointer`}>
       {options.map((o) => (
         <option key={o} value={o}>
           {o}
         </option>
       ))}
     </select>
+  );
+}
+
+function Toggle({ label, checked, onChange }) {
+  return (
+    <label className="inline-flex items-center gap-2 text-sm text-slate-700 cursor-pointer select-none">
+      <input
+        type="checkbox"
+        checked={checked}
+        onChange={(e) => onChange(e.target.checked)}
+        className="w-4 h-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+      />
+      {label}
+    </label>
   );
 }

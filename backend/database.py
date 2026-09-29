@@ -80,6 +80,8 @@ def init_db():
         ("actual_outcome", "TEXT"),
         ("outcome_recorded_by", "TEXT"),
         ("outcome_recorded_at", "TEXT"),
+        # "ticket" (ITIL change) or "code" (GitHub commit / PR).
+        ("assessment_type", "TEXT"),
     ]
 
     for column_name, column_type in migrations:
@@ -328,9 +330,10 @@ def save_assessment(
             details_json,
             mode,
             model_version,
-            policy_version
+            policy_version,
+            assessment_type
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             datetime.now().strftime("%Y-%m-%d %H:%M"),
@@ -355,6 +358,7 @@ def save_assessment(
             else "controlled",
             MODEL_VERSION,
             POLICY_VERSION,
+            details.get("kind", "ticket") if details else "ticket",
         ),
     )
 

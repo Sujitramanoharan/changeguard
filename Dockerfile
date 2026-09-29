@@ -22,25 +22,16 @@ WORKDIR /app
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1
 
-# Install system dependencies
+# Install system dependencies.
+# libgomp1 is the OpenMP runtime LightGBM needs on slim images.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
     curl \
+    libgomp1 \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy Python requirements
+# Install Python dependencies
 COPY requirements.txt .
-
-# Install CPU-only PyTorch from the official CPU wheel index.
-# Avoids pulling the much larger CUDA-enabled build from PyPI.
-RUN pip install --no-cache-dir \
-    torch==2.14.0 \
-    --index-url https://download.pytorch.org/whl/cpu
-
-# Install remaining Python dependencies without reinstalling PyTorch
-RUN sed '/^torch==/d' requirements.txt > requirements-docker.txt \
-    && pip install --no-cache-dir -r requirements-docker.txt \
-    && rm requirements-docker.txt
+RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application source
 COPY . .
@@ -56,9 +47,9 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
     CMD curl -f http://localhost:${PORT:-7860}/health || exit 1
 
 # Start production server.
-# A single worker on purpose: each worker independently loads the full
-# ML model, FAISS index, and embedding model into memory, which does
-# not fit in the 512MB RAM of small/free hosting tiers with more than one.
+# A single worker on purpose: each worker independently loads both risk
+# models and their FAISS indexes, and one worker comfortably fits the
+# 512MB RAM of small/free hosting tiers.
 #
 # $PORT is set by hosts such as Render; 7860 is the local default.
 # --proxy-headers makes the real client IP (X-Forwarded-For) visible,

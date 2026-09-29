@@ -179,6 +179,8 @@ export const api = {
   me: () => get("/auth/me"),
   assess: (change) => post("/assess", change),
   assessAutonomous: (change) => post("/assess-autonomous", change),
+  assessCode: (payload) => post("/assess-code", payload),
+  formOptions: () => get("/form-options"),
   verifyRollbackDocument: (file) =>
     postFile("/documents/verify-rollback", file),
   analyzeRepoChange: (url) => post("/analyze-repo-change", { url }),

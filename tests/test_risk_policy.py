@@ -199,3 +199,34 @@ def test_score_thresholds_are_exclusive_boundaries():
     )
     assert at_reject_boundary["score"] == 0.55
     assert at_reject_boundary["recommendation"] == "REJECT"
+
+
+def test_unverified_document_never_auto_approves():
+    # Even a change the model considers very safe goes to REVIEW when the
+    # uploaded document does not back up the claimed rollback plan.
+    result = calculate_risk_policy(
+        ml={"risk_index": 0.02},
+        change=make_change(
+            rollback_document_provided=True,
+            rollback_document_verified=False,
+        ),
+        similar=[],
+        schedule={},
+    )
+
+    assert result["score"] < 0.30
+    assert result["recommendation"] == "REVIEW"
+
+
+def test_similar_failures_only_count_above_base_rate():
+    # For code changes ~29% of commits are buggy, so 1 of 5 similar
+    # commits failing is normal and must not add risk.
+    result = calculate_risk_policy(
+        ml={"risk_index": 0.2, "base_rate": 0.29},
+        change=make_change(),
+        similar=[{"bad": True}] + [{"bad": False}] * 4,
+        schedule={},
+    )
+
+    assert result["similar_risk"] is False
+    assert result["score"] == round(0.2 * 0.4, 3)

@@ -9,3 +9,4 @@ web/node_modules/
 frontend_dist/
 *.whl
 .pytest_cache/
+data/raw/

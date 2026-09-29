@@ -34,103 +34,45 @@ if os.getenv("CHANGEGUARD_PREFER_IPV4", "").lower() in ("1", "true", "yes"):
 
     socket.getaddrinfo = _ipv4_first_getaddrinfo
 
-DATA_PATH = ROOT / "data" / "changeguard_dataset.csv"
-
 MODELS_DIR = ROOT / "models"
 MODELS_DIR.mkdir(exist_ok=True)
 
 
 # -------------------------------------------------------------------
-# Trained ML model artifacts
+# Public datasets (downloaded by scripts/download_datasets.py)
 # -------------------------------------------------------------------
 
-MODEL_PATH = MODELS_DIR / "risk_model.pkl"
-ENCODERS_PATH = MODELS_DIR / "encoders.pkl"
-THRESHOLD_PATH = MODELS_DIR / "threshold.pkl"
+RAW_DATA_DIR = ROOT / "data" / "raw"
+
+APACHEJIT_CSV = RAW_DATA_DIR / "apachejit_total.csv"
+BPIC_CHANGE_CSV = RAW_DATA_DIR / "bpic2014_change.csv"
+BPIC_INCIDENT_CSV = RAW_DATA_DIR / "bpic2014_incident.csv"
+
+
+# -------------------------------------------------------------------
+# Trained model artifacts
+# -------------------------------------------------------------------
+
+# Change-ticket model (Rabobank BPIC 2014 ITIL records).
+TICKET_MODEL_PATH = MODELS_DIR / "ticket_model.pkl"
+TICKET_STATS_PATH = MODELS_DIR / "ticket_stats.json"
+TICKET_INDEX_PATH = MODELS_DIR / "ticket_similar.index"
+
+# Code-change model (ApacheJIT commits).
+CODE_MODEL_PATH = MODELS_DIR / "code_model.pkl"
+CODE_INDEX_PATH = MODELS_DIR / "code_similar.index"
+
+# Held-out evaluation of both models, shown in the in-app model card.
 METRICS_PATH = MODELS_DIR / "metrics.json"
-
-
-# -------------------------------------------------------------------
-# Model features
-# -------------------------------------------------------------------
-
-# The ONLY features allowed as model inputs.
-#
-# outcome / true_risk_probability / risk_level are targets.
-# They must never be used as model inputs because that would cause
-# target leakage.
-
-FEATURE_COLUMNS = [
-    "system",
-    "change_type",
-    "change_size",
-    "requester_team",
-    "requested_window",
-    "rollback_plan_exists",
-    "rollback_plan_tested",
-    "similar_past_changes_count",
-    "similar_past_changes_failure_rate",
-    "system_incidents_last_90_days",
-    "schedule_conflict",
-]
-
-
-# Text/categorical features that require encoding.
-CATEGORICAL_COLUMNS = [
-    "system",
-    "change_type",
-    "change_size",
-    "requester_team",
-    "requested_window",
-    "rollback_plan_exists",
-    "rollback_plan_tested",
-    "schedule_conflict",
-]
-
-
-# Numeric features.
-NUMERIC_COLUMNS = [
-    "similar_past_changes_count",
-    "similar_past_changes_failure_rate",
-    "system_incidents_last_90_days",
-]
-
-
-# Target: predict whether a change will be bad
-# (Failed or Caused-Incident).
-TARGET_COLUMN = "outcome"
-
-
-# -------------------------------------------------------------------
-# FAISS retrieval artifacts
-# -------------------------------------------------------------------
-
-FAISS_INDEX_PATH = MODELS_DIR / "faiss.index"
-FAISS_META_PATH = MODELS_DIR / "faiss_meta.pkl"
-
-
-# -------------------------------------------------------------------
-# Embedding model
-# -------------------------------------------------------------------
-
-# Model name used when downloading/building the embedding model.
-EMBED_MODEL_NAME = "all-MiniLM-L6-v2"
-
-# Local copy of the embedding model.
-#
-# This directory is packaged into the production Docker image so
-# ChangeGuard does not need to download the model from Hugging Face
-# during deployment or startup.
-EMBED_MODEL_PATH = MODELS_DIR / EMBED_MODEL_NAME
 
 
 # -------------------------------------------------------------------
 # Audit / version metadata
 # -------------------------------------------------------------------
 
-MODEL_VERSION = "risk-model-v2"
-POLICY_VERSION = "risk-policy-v1"
-APP_VERSION = "1.0.0"
+MODEL_VERSION = "risk-models-v3-real-data"
+POLICY_VERSION = "risk-policy-v2"
+APP_VERSION = "2.0.0"
 
 
 # -------------------------------------------------------------------

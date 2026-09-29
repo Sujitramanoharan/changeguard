@@ -15,13 +15,28 @@ def calculate_risk_policy(
     tracked separately from an actual conflict on the submitted change.
     """
 
-    prob = ml.get("risk_probability", 0.3)
+    # risk_index expresses the model's probability relative to the
+    # average historical change (0.5 = average, see ticket_risk.
+    # risk_summary). Real outcomes are skewed, so a raw probability of
+    # 0.12 can mean "3x riskier than usual".
+    prob = ml.get("risk_index", ml.get("risk_probability", 0.3))
 
     failed_similar = [
         s
         for s in similar
-        if s.get("outcome") in ["Failed", "Caused-Incident"]
+        if s.get("bad") or s.get("outcome") in ["Failed", "Caused-Incident"]
     ]
+
+    # Similar past changes count against this one only when they went
+    # wrong more often than changes in general did.
+    base_rate = float(ml.get("base_rate") or 0.0)
+    similar_failure_rate = (
+        len(failed_similar) / len(similar) if similar else 0.0
+    )
+    similar_risk = (
+        len(failed_similar) > 0
+        and similar_failure_rate > 2 * base_rate
+    )
 
     has_rollback = change.get("rollback_plan_exists") == "Yes"
     tested_rollback = change.get("rollback_plan_tested") == "Yes"
@@ -47,13 +62,14 @@ def calculate_risk_policy(
         change.get("schedule_conflict") == "Yes"
     )
 
-    # Historical evidence about conflicts in the requested window.
+    # Historical evidence about the requested window.
     schedule_conflict_frequency = float(
         schedule.get("conflict_frequency", 0)
     )
 
     historical_schedule_risk = (
-        schedule_conflict_frequency > 0.3
+        bool(schedule.get("high_risk_window"))
+        or schedule_conflict_frequency > 0.3
     )
 
     # Schedule contributes to the risk score when either:
@@ -75,7 +91,7 @@ def calculate_risk_policy(
     if schedule_risk:
         score += 0.2
 
-    if len(failed_similar) > 0:
+    if similar_risk:
         score += 0.15
 
     if evidence_mismatch:
@@ -91,11 +107,20 @@ def calculate_risk_policy(
         recommendation = "APPROVE"
         risk_level = "Low"
 
+    # A rollback claim contradicted by its own document is a credibility
+    # problem, not a statistical one: never auto-approve it, however
+    # safe the model thinks the change is.
+    if evidence_mismatch and recommendation == "APPROVE":
+        recommendation = "REVIEW"
+        risk_level = "Medium"
+
     return {
         "score": round(score, 3),
         "recommendation": recommendation,
         "risk_level": risk_level,
         "failed_similar_count": len(failed_similar),
+        "similar_failure_rate": round(similar_failure_rate, 3),
+        "similar_risk": similar_risk,
         "has_rollback": has_rollback,
         "tested_rollback": tested_rollback,
         "has_schedule_conflict": actual_schedule_conflict,

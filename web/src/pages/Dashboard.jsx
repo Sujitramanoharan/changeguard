@@ -57,7 +57,7 @@ export default function Dashboard() {
           </div>
           <h1 className="text-3xl font-extrabold tracking-tight text-white">Change Risk Operations</h1>
           <p className="text-slate-300 text-sm max-w-xl">
-            Real-time automated change advisory analysis powered by a calibrated ML risk model, FAISS retrieval over past changes, a deterministic risk policy, and LLM explanations.
+            Risk models trained on 26,000 real bank IT changes and 106,000 real code commits, explained factor by factor, decided by an auditable policy, approved by people.
           </p>
         </div>
         <div className="relative z-10 flex items-center gap-3">

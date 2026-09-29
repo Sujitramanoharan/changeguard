@@ -29,12 +29,13 @@ export default function History() {
 
   const exportCSV = () => {
     if (filtered.length === 0) return;
-    const headers = ["ID", "Date", "System", "Change Type", "Size", "Team", "Risk Level", "AI Recommendation", "CAB Decision", "CAB Decided By", "CAB Comment", "Actual Outcome", "Justification"];
+    const headers = ["ID", "Date", "Type", "System", "Change Type", "Size", "Team", "Risk Level", "AI Recommendation", "CAB Decision", "CAB Decided By", "CAB Comment", "Actual Outcome", "Justification"];
     const csvRows = [headers.join(",")];
     filtered.forEach((r) => {
       const row = [
         r.id,
         `"${r.created_at}"`,
+        `"${r.assessment_type === "code" ? "Code change" : "Change ticket"}"`,
         `"${r.system}"`,
         `"${r.change_type}"`,
         `"${r.change_size || ''}"`,
@@ -127,6 +128,7 @@ export default function History() {
               <thead>
                 <tr className="bg-slate-50/80 border-b border-slate-200 text-slate-400 font-bold uppercase tracking-wider">
                   <th className="px-5 py-3.5">Timestamp</th>
+                  <th className="px-5 py-3.5">Type</th>
                   <th className="px-5 py-3.5">System</th>
                   <th className="px-5 py-3.5">Change Type</th>
                   <th className="px-5 py-3.5">Risk Rating</th>
@@ -143,6 +145,11 @@ export default function History() {
                     className="hover:bg-indigo-50/30 transition-colors cursor-pointer group"
                   >
                     <td className="px-5 py-4 font-mono text-slate-500 whitespace-nowrap">{r.created_at}</td>
+                    <td className="px-5 py-4">
+                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${r.assessment_type === "code" ? "bg-slate-900 text-white" : "bg-indigo-50 text-indigo-700"}`}>
+                        {r.assessment_type === "code" ? "CODE" : "TICKET"}
+                      </span>
+                    </td>
                     <td className="px-5 py-4 font-bold text-slate-900 group-hover:text-indigo-600 transition-colors">
                       {r.system}
                     </td>

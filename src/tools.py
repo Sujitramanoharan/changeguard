@@ -1,56 +1,101 @@
 """
 ChangeGuard evidence tools.
 
-Each function gathers one kind of real evidence about a change from the
-historical dataset. The agent calls these to build its risk assessment.
-These are deterministic lookups (no AI) - fast and reliable.
+Deterministic lookups (no AI) against statistics computed from the real
+Rabobank change history at training time (models/ticket_stats.json),
+plus the rollback readiness check. The agents call these to gather
+evidence; the risk policy uses their results.
 """
-import pandas as pd
-from config import DATA_PATH
 
-# Load the historical data once
-_df = pd.read_csv(DATA_PATH)
-_df["rollback_plan_tested"] = _df["rollback_plan_tested"].fillna("None")
+from ticket_risk import WEEKDAYS, load_stats
+
+# A historical rate needs this many past changes behind it to count.
+MIN_SAMPLES = 50
 
 
-def get_incident_history(system: str) -> dict:
-    """How stable has this system been recently?"""
-    rows = _df[_df["system"] == system]
-    if len(rows) == 0:
-        return {"system": system, "found": False,
-                "note": "No historical data for this system."}
-    avg_incidents = round(rows["system_incidents_last_90_days"].mean(), 2)
-    bad = rows["outcome"].isin(["Failed", "Caused-Incident"]).mean()
+def _rate(table: dict, key) -> dict | None:
+    row = table.get(str(key))
+    if not row or row["n"] < MIN_SAMPLES:
+        return None
+    return row
+
+
+def get_incident_history(ticket: dict) -> dict:
+    """How unstable is the affected system, and how do changes to this
+    kind of system usually go?"""
+
+    stats = load_stats()
+    base = stats["base_rate"]
+    recent = int(ticket.get("incidents_30d") or 0)
+    subtype = ticket.get("ci_subtype")
+    row = _rate(stats["rates"]["ci_subtype"], subtype)
+
+    parts = [f"The affected system had {recent} incident(s) in the last 30 days."]
+
+    if row:
+        parts.append(
+            f"Historically, {row['rate'] * 100:.1f}% of {row['n']:,} changes on "
+            f"'{subtype}' systems were followed by more incidents "
+            f"(vs {base * 100:.1f}% across all changes)."
+        )
+    else:
+        parts.append(f"Too little history for '{subtype}' systems to compare.")
+
     return {
-        "system": system,
-        "found": True,
-        "avg_incidents_last_90_days": avg_incidents,
-        "historical_failure_rate": round(float(bad), 3),
-        "note": (f"{system} averages {avg_incidents} incidents/90 days; "
-                 f"{round(bad*100)}% of its past changes went badly."),
+        "system_type": subtype,
+        "incidents_30d": recent,
+        "historical_rate": row["rate"] if row else None,
+        "base_rate": base,
+        "note": " ".join(parts),
     }
 
 
-def check_schedule_conflict(requested_window: str) -> dict:
-    """Are changes in this time window historically riskier?"""
-    rows = _df[_df["requested_window"] == requested_window]
-    if len(rows) == 0:
-        return {"window": requested_window, "found": False,
-                "note": "No historical data for this window."}
-    bad = rows["outcome"].isin(["Failed", "Caused-Incident"]).mean()
-    conflict_rate = (rows["schedule_conflict"] == "Yes").mean()
+def check_schedule_conflict(ticket: dict) -> dict:
+    """Are changes started at this day/hour historically riskier?"""
+
+    stats = load_stats()
+    base = stats["base_rate"]
+    day = ticket.get("weekday")
+    hour = ticket.get("hour")
+
+    day_row = _rate(stats["rates"]["weekday"], day)
+    hour_row = _rate(stats["rates"]["hour"], hour)
+
+    parts, risky = [], False
+
+    if day_row and day is not None:
+        parts.append(
+            f"Changes starting on {WEEKDAYS[int(day)]} raised incidents "
+            f"{day_row['rate'] * 100:.1f}% of the time."
+        )
+        risky |= day_row["rate"] > 1.5 * base
+
+    if hour_row and hour is not None:
+        parts.append(
+            f"Changes starting at {int(hour):02d}:00 raised incidents "
+            f"{hour_row['rate'] * 100:.1f}% of the time."
+        )
+        risky |= hour_row["rate"] > 1.5 * base
+
+    if not parts:
+        parts.append("Not enough history for this start time.")
+
+    parts.append(f"Average across all changes: {base * 100:.1f}%.")
+
+    if risky:
+        parts.append("This is a historically high-risk window.")
+
     return {
-        "window": requested_window,
-        "found": True,
-        "historical_failure_rate": round(float(bad), 3),
-        "conflict_frequency": round(float(conflict_rate), 3),
-        "note": (f"Changes during {requested_window} fail {round(bad*100)}% of "
-                 f"the time; {round(conflict_rate*100)}% had scheduling conflicts."),
+        "weekday": day,
+        "hour": hour,
+        "high_risk_window": risky,
+        "note": " ".join(parts),
     }
 
 
 def get_rollback_status(rollback_exists: str, rollback_tested: str) -> dict:
     """Assess the safety net for this change."""
+
     if rollback_exists != "Yes":
         level = "HIGH CONCERN"
         note = "No rollback plan exists - if this change fails, recovery is hard."
@@ -60,6 +105,7 @@ def get_rollback_status(rollback_exists: str, rollback_tested: str) -> dict:
     else:
         level = "MODERATE CONCERN"
         note = "A rollback plan exists but has not been tested."
+
     return {
         "rollback_exists": rollback_exists,
         "rollback_tested": rollback_tested,
@@ -68,8 +114,25 @@ def get_rollback_status(rollback_exists: str, rollback_tested: str) -> dict:
     }
 
 
-if __name__ == "__main__":
-    # quick test
-    print(get_incident_history("Payments-Service"))
-    print(check_schedule_conflict("Peak-Hours"))
-    print(get_rollback_status("No", "None"))
+def describe_code_change(analysis: dict, metrics: dict) -> dict:
+    """Summarise what a real code diff touches."""
+
+    parts = [
+        f"{metrics['nf']} file(s) across {metrics['nd']} director(ies) and "
+        f"{metrics['ns']} top-level module(s): +{metrics['la']:,}/-{metrics['ld']:,} lines."
+    ]
+
+    kind = analysis.get("change_type")
+    if kind == "Database-Schema-Change":
+        parts.append("Touches database migrations or schema files.")
+    elif kind == "Infrastructure-Change":
+        parts.append("Touches infrastructure / deployment configuration.")
+    elif kind == "Security-Patch":
+        parts.append("Security-related change.")
+
+    parts.append(
+        "Test files were updated." if analysis.get("touches_tests")
+        else "No test files were changed."
+    )
+
+    return {"note": " ".join(parts), "change_type": kind}

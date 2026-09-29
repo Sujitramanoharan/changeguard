@@ -1,0 +1,227 @@
+[
+ {
+  "system": "django/django",
+  "change_type": "Database-Schema-Change",
+  "change_size": "Medium",
+  "requester_team": "Backend",
+  "requested_window": "Business-Hours-Weekday",
+  "rollback_plan_exists": "No",
+  "rollback_plan_tested": "None",
+  "schedule_conflict": "No",
+  "description": "[Auto-analyzed from https://github.com/django/django/commit/b3f4d83aad7f589f165a6d8b020b7acba4936f35] Fixed #37013 -- Deprecated Trunc/Extract in migrations with USE_TZ=True and no tzinfo.",
+  "code_metrics": {
+   "la": 95,
+   "ld": 0,
+   "nf": 5,
+   "nd": 5,
+   "ns": 3,
+   "ent": 2.0755
+  },
+  "analysis": {
+   "files_changed": 5,
+   "additions": 95,
+   "deletions": 0,
+   "author": "Huwaiza",
+   "commit_message": "Fixed #37013 -- Deprecated Trunc/Extract in migrations with USE_TZ=True and no tzinfo.\n\nIn Django 2029, the current timezone will be stored in the migration.",
+   "filenames": [
+    "django/db/models/functions/datetime.py",
+    "docs/internals/deprecation.txt",
+    "docs/ref/models/database-functions.txt",
+    "docs/releases/6.2.txt",
+    "tests/db_functions/datetime/test_extract_trunc.py"
+   ],
+   "detected_rollback_language": false,
+   "touches_tests": true
+  },
+  "url": "https://github.com/django/django/commit/b3f4d83aad7f589f165a6d8b020b7acba4936f35"
+ },
+ {
+  "system": "fastapi/fastapi",
+  "change_type": "Security-Patch",
+  "change_size": "Large",
+  "requester_team": "Backend",
+  "requested_window": "Business-Hours-Weekday",
+  "rollback_plan_exists": "No",
+  "rollback_plan_tested": "None",
+  "schedule_conflict": "No",
+  "description": "[Auto-analyzed from https://github.com/fastapi/fastapi/commit/a3558be5f81235569114d50fdf24575ac0bc82b5] \ud83d\udd12\ufe0f Improve GitHub actions security (#15607)",
+  "code_metrics": {
+   "la": 85,
+   "ld": 1,
+   "nf": 22,
+   "nd": 2,
+   "ns": 2,
+   "ent": 3.7864
+  },
+  "analysis": {
+   "files_changed": 22,
+   "additions": 85,
+   "deletions": 1,
+   "author": "Yurii Motov",
+   "commit_message": "\ud83d\udd12\ufe0f Improve GitHub actions security (#15607)",
+   "filenames": [
+    ".github/workflows/add-to-project.yml",
+    ".github/workflows/build-docs.yml",
+    ".github/workflows/contributors.yml",
+    ".github/workflows/deploy-docs.yml",
+    ".github/workflows/detect-conflicts.yml",
+    ".github/workflows/guard-dependencies.yml",
+    ".github/workflows/issue-manager.yml",
+    ".github/workflows/label-approved.yml",
+    ".github/workflows/labeler.yml",
+    ".github/workflows/latest-changes.yml"
+   ],
+   "detected_rollback_language": false,
+   "touches_tests": true
+  },
+  "url": "https://github.com/fastapi/fastapi/commit/a3558be5f81235569114d50fdf24575ac0bc82b5"
+ },
+ {
+  "system": "django/django",
+  "change_type": "Deployment",
+  "change_size": "Medium",
+  "requester_team": "Backend",
+  "requested_window": "Business-Hours-Weekday",
+  "rollback_plan_exists": "Yes",
+  "rollback_plan_tested": "Yes",
+  "schedule_conflict": "No",
+  "description": "[Auto-analyzed from https://github.com/django/django/commit/fb32a564ccc6f91d4b7594f5707c62fab0c11c04] Fixed #37348 -- Reverted \"Fixed #36806 -- Added system check for null kwarg in GeneratedField.\".",
+  "code_metrics": {
+   "la": 5,
+   "ld": 43,
+   "nf": 5,
+   "nd": 5,
+   "ns": 3,
+   "ent": 1.7869
+  },
+  "analysis": {
+   "files_changed": 5,
+   "additions": 5,
+   "deletions": 43,
+   "author": "Natalia",
+   "commit_message": "Fixed #37348 -- Reverted \"Fixed #36806 -- Added system check for null kwarg in GeneratedField.\".\n\nThis reverts commit 6025eab3c509b4de922117e16866bbfe0ee99aa6, includes a\nrelease note for 6.1.2, and keeps fields.W225 documented as removed.\n\nThanks to Michal Porte\u0161 for the report, and to Jacob Walls and\nSimon Charette for reviews.",
+   "filenames": [
+    "django/db/models/fields/generated.py",
+    "docs/ref/checks.txt",
+    "docs/ref/models/fields.txt",
+    "docs/releases/6.1.2.txt",
+    "tests/invalid_models_tests/test_ordinary_fields.py"
+   ],
+   "detected_rollback_language": true,
+   "touches_tests": true
+  },
+  "url": "https://github.com/django/django/commit/fb32a564ccc6f91d4b7594f5707c62fab0c11c04"
+ },
+ {
+  "system": "pallets/flask",
+  "change_type": "Deployment",
+  "change_size": "Small",
+  "requester_team": "Backend",
+  "requested_window": "Business-Hours-Weekday",
+  "rollback_plan_exists": "Yes",
+  "rollback_plan_tested": "Yes",
+  "schedule_conflict": "No",
+  "description": "[Auto-analyzed from https://github.com/pallets/flask/commit/d98eb69a354158252854ed4a5c9778e03d089191] revert cli test change",
+  "code_metrics": {
+   "la": 2,
+   "ld": 7,
+   "nf": 1,
+   "nd": 1,
+   "ns": 1,
+   "ent": 0.0
+  },
+  "analysis": {
+   "files_changed": 1,
+   "additions": 2,
+   "deletions": 7,
+   "author": "David Lord",
+   "commit_message": "revert cli test change",
+   "filenames": [
+    "tests/test_cli.py"
+   ],
+   "detected_rollback_language": true,
+   "touches_tests": true
+  },
+  "url": "https://github.com/pallets/flask/commit/d98eb69a354158252854ed4a5c9778e03d089191"
+ },
+ {
+  "system": "hashicorp/terraform",
+  "change_type": "Infrastructure-Change",
+  "change_size": "Medium",
+  "requester_team": "Backend",
+  "requested_window": "Business-Hours-Weekday",
+  "rollback_plan_exists": "No",
+  "rollback_plan_tested": "None",
+  "schedule_conflict": "No",
+  "description": "[Auto-analyzed from https://github.com/hashicorp/terraform/commit/26d3680a26ffb30ea4c63f4498dc2f3125f8b2a4] chore(deps): bump the github-actions-backward-compatible group across 1 directory with 4 updates (#38956)",
+  "code_metrics": {
+   "la": 21,
+   "ld": 21,
+   "nf": 8,
+   "nd": 1,
+   "ns": 1,
+   "ent": 2.5061
+  },
+  "analysis": {
+   "files_changed": 8,
+   "additions": 21,
+   "deletions": 21,
+   "author": "dependabot[bot]",
+   "commit_message": "chore(deps): bump the github-actions-backward-compatible group across 1 directory with 4 updates (#38956)\n\nBumps the github-actions-backward-compatible group with 4 updates in the / directory: [actions/checkout](https://github.com/actions/checkout), [docker/setup-qemu-action](https://github.com/docker/setup-qemu-action), [miniscruff/changie-action](https://github.com/miniscruff/changie-action) and [dorny/paths-filter](https://github.com/dorny/paths-filter).\n\n\nUpdates `actions/checkout` from 7.0.",
+   "filenames": [
+    ".github/workflows/build-terraform-cli.yml",
+    ".github/workflows/build.yml",
+    ".github/workflows/changelog-validation.yml",
+    ".github/workflows/checks.yml",
+    ".github/workflows/enforce-changelog.yml",
+    ".github/workflows/equivalence-test-diff.yml",
+    ".github/workflows/equivalence-test-manual-update.yml",
+    ".github/workflows/equivalence-test-update.yml"
+   ],
+   "detected_rollback_language": false,
+   "touches_tests": true
+  },
+  "url": "https://github.com/hashicorp/terraform/commit/26d3680a26ffb30ea4c63f4498dc2f3125f8b2a4"
+ },
+ {
+  "system": "Sujitramanoharan/changeguard",
+  "change_type": "Security-Patch",
+  "change_size": "Large",
+  "requester_team": "Backend",
+  "requested_window": "Business-Hours-Weekday",
+  "rollback_plan_exists": "Yes",
+  "rollback_plan_tested": "Yes",
+  "schedule_conflict": "No",
+  "description": "[Auto-analyzed from https://github.com/Sujitramanoharan/changeguard/commit/d664d1e9f9a13b2fe170d30ce03d9ab946e5a53b] Security fixes, retrained model, CAB decisions, Render deployment",
+  "code_metrics": {
+   "la": 1889,
+   "ld": 166,
+   "nf": 29,
+   "nd": 8,
+   "ns": 6,
+   "ent": 3.8992
+  },
+  "analysis": {
+   "files_changed": 29,
+   "additions": 1889,
+   "deletions": 166,
+   "author": "Sujitramanoharan",
+   "commit_message": "Security fixes, retrained model, CAB decisions, Render deployment",
+   "filenames": [
+    ".dockerignore",
+    "Dockerfile",
+    "README.md",
+    "backend/database.py",
+    "backend/main.py",
+    "models/metrics.json",
+    "models/risk_model.pkl",
+    "models/threshold.pkl",
+    "render.yaml",
+    "src/agent.py"
+   ],
+   "detected_rollback_language": true,
+   "touches_tests": true
+  },
+  "url": "https://github.com/Sujitramanoharan/changeguard/commit/d664d1e9f9a13b2fe170d30ce03d9ab946e5a53b"
+ }
+]

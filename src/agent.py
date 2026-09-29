@@ -1,37 +1,47 @@
 """
-ChangeGuard controlled agent pipeline.
+ChangeGuard controlled pipeline.
 
-Flow (perceive -> gather evidence via tools -> reason -> recommend):
-  1. Retrieve similar past changes (FAISS)
-  2. Derive backend historical context
-  3. Predict risk with the ML model
-  4. Gather incident / schedule / rollback evidence (tools)
-  5. Calculate the authoritative deterministic risk policy
-  6. Send evidence to Groq -> explanation only
+Two kinds of change, one decision process:
+
+  Change ticket (ITIL)            Code change (GitHub commit / PR)
+  - ticket model (Rabobank)       - code model (ApacheJIT)
+  - similar real changes          - similar real commits
+  - incident / window evidence    - diff evidence
+            \\                      /
+             rollback readiness + uploaded document check
+                         |
+          deterministic risk policy (authoritative)
+                         |
+          LLM writes the explanation only (rule-based fallback)
 """
 
 import truststore
 truststore.inject_into_ssl()
 
 import os
-from pathlib import Path
+from datetime import datetime
 
-from dotenv import load_dotenv
+import config  # noqa: F401  (loads .env, network settings)
 
-# Load Groq key from .env sitting in the project root
-load_dotenv(dotenv_path=Path(__file__).parent.parent / ".env")
-
-from predict import predict_risk
-from retrieval import find_similar_changes
+import code_risk
+import similarity
+import ticket_risk
+from config import CODE_INDEX_PATH, TICKET_INDEX_PATH
+from risk_policy import calculate_risk_policy
 from tools import (
-    get_incident_history,
     check_schedule_conflict,
+    describe_code_change,
+    get_incident_history,
     get_rollback_status,
 )
-from build_index import change_to_text
-from context import derive_change_context
-from risk_policy import calculate_risk_policy
 
+
+LLM_MODEL = "openai/gpt-oss-120b"
+
+
+# -------------------------------------------------------------------
+# Shared evidence helpers
+# -------------------------------------------------------------------
 
 def describe_document_evidence(change: dict) -> dict:
     """Summarize whether an uploaded rollback document backs up the claim."""
@@ -66,329 +76,321 @@ def describe_document_evidence(change: dict) -> dict:
     }
 
 
-def generate_fallback_assessment(
-    change,
-    ml,
-    similar,
-    incidents,
-    schedule,
-    rollback,
-):
-    """Fallback rule-grounded reasoning when LLM is unavailable."""
+def describe_similar(similar: list) -> dict:
+    bad = sum(1 for s in similar if s.get("bad"))
+    return {
+        "count": len(similar),
+        "bad": bad,
+        "note": (
+            f"{bad} of the {len(similar)} most similar real historical "
+            f"changes went wrong."
+            if similar else "No similar historical changes found."
+        ),
+    }
 
-    policy = calculate_risk_policy(
-        ml,
-        change,
-        similar,
-        schedule,
-    )
 
-    rec = policy["recommendation"]
-    level = policy["risk_level"]
+def prepare_ticket(ticket: dict) -> dict:
+    """Derive model inputs (start day/hour) from the planned start."""
 
-    prob = ml.get("risk_probability", 0.3)
-    failed_similar_count = policy["failed_similar_count"]
-    has_rollback = policy["has_rollback"]
-    tested_rollback = policy["tested_rollback"]
-    has_conflict = policy["has_schedule_conflict"]
+    ticket = dict(ticket)
+    start = ticket.get("planned_start")
 
-    justification_parts = []
+    if start and (ticket.get("weekday") is None or ticket.get("hour") is None):
+        when = datetime.fromisoformat(str(start))
+        ticket["weekday"] = when.weekday()
+        ticket["hour"] = when.hour
 
-    justification_parts.append(
-        f"ML Model predicts a {round(prob * 100)}% failure risk "
-        f"for {change.get('system', 'this system')}."
-    )
+    for flag in ("downtime", "emergency", "cab_required"):
+        ticket[flag] = int(bool(ticket.get(flag)))
 
-    if len(similar) > 0:
-        justification_parts.append(
-            f"Historical analysis of {len(similar)} similar changes "
-            f"showed {failed_similar_count} past failures or incidents."
-        )
+    return ticket
 
-    if incidents.get("note"):
-        justification_parts.append(
-            incidents["note"]
-        )
 
-    if not has_rollback:
-        justification_parts.append(
-            "CRITICAL: No rollback plan is present for this change."
-        )
-    elif not tested_rollback:
-        justification_parts.append(
-            "Rollback plan is documented but has not been tested in staging."
-        )
+# -------------------------------------------------------------------
+# Explanation (LLM with rule-based fallback)
+# -------------------------------------------------------------------
 
-    if has_conflict:
-        justification_parts.append(
-            f"Scheduled during {change.get('requested_window', 'peak window')} "
-            f"which carries higher incident correlation."
-        )
+def fallback_justification(ml: dict, policy: dict, evidence: dict) -> str:
+    """Rule-grounded explanation used when the LLM is unavailable."""
+
+    parts = [
+        f"The {'code' if ml.get('model') == 'code' else 'change'} risk model rates this change "
+        f"{ml['relative_risk']}x as risky as a typical change "
+        f"({ml['risk_probability'] * 100:.1f}% probability)."
+    ]
+
+    if ml.get("factors"):
+        top = ml["factors"][0]
+        parts.append(f"The biggest factor is {top['label'].lower()} ({top['value']}), which {top['direction']}.")
+
+    parts.append(evidence["similar"]["note"])
+
+    for key in ("incidents", "schedule", "diff"):
+        if key in evidence:
+            parts.append(evidence[key]["note"])
+
+    if not policy["has_rollback"]:
+        parts.append("CRITICAL: No rollback plan is present for this change.")
+    elif not policy["tested_rollback"]:
+        parts.append("The rollback plan has not been tested.")
 
     if policy.get("evidence_mismatch"):
-        justification_parts.append(
+        parts.append(
             "CRITICAL: A rollback plan document was uploaded but does "
             "not substantiate a real rollback procedure."
         )
 
-    justification = " ".join(justification_parts)
-
-    return (
-        f"RECOMMENDATION: {rec}\n"
-        f"RISK LEVEL: {level}\n"
-        f"JUSTIFICATION: {justification}"
-    )
+    return " ".join(parts)
 
 
-def assess_change(change: dict) -> dict:
-    """Run the full ChangeGuard assessment on one change request."""
+def explain(policy: dict, evidence_text: str) -> tuple[str | None, str]:
+    """Ask the LLM to explain an already-made decision.
 
-    # ---------------------------------------------------------
-    # 1. Retrieve similar past changes
-    # ---------------------------------------------------------
+    Returns (justification or None, source).
+    """
 
-    query = change_to_text(
-        {
-            **change,
-            "description": change.get("description", ""),
-        }
-    )
+    if not os.environ.get("GROQ_API_KEY"):
+        return None, "fallback"
 
-    similar = find_similar_changes(
-        query,
-        k=5,
-    )
+    try:
+        from langchain_groq import ChatGroq
 
-    # ---------------------------------------------------------
-    # 2. Derive backend historical context
-    # ---------------------------------------------------------
+        llm = ChatGroq(model=LLM_MODEL, temperature=0)
 
-    historical_context = derive_change_context(
-        change,
-        similar_changes=similar,
-    )
-
-    # Add backend-derived historical features to a copy of
-    # the current request before sending it to the ML model.
-    enriched_change = {
-        **change,
-        **historical_context,
-    }
-
-    # ---------------------------------------------------------
-    # 3. ML risk prediction
-    # ---------------------------------------------------------
-
-    ml = predict_risk(enriched_change)
-
-    # ---------------------------------------------------------
-    # 4. Gather tool evidence
-    # ---------------------------------------------------------
-
-    incidents = get_incident_history(
-        change["system"]
-    )
-
-    schedule = check_schedule_conflict(
-        change["requested_window"]
-    )
-
-    rollback = get_rollback_status(
-        change["rollback_plan_exists"],
-        change.get("rollback_plan_tested", "None"),
-    )
-
-    document = describe_document_evidence(change)
-
-    # ---------------------------------------------------------
-    # 5. Build evidence summary
-    # ---------------------------------------------------------
-
-    similar_txt = "\n".join(
-        f"  - {s['change_id']}: "
-        f"{s['change_type']} on {s['system']} "
-        f"(similarity {s['similarity']}) "
-        f"-> outcome: {s['outcome']}"
-        for s in similar
-    )
-
-    evidence = f"""
-CHANGE REQUEST:
-  System: {change['system']}
-  Type: {change['change_type']} | Size: {change['change_size']}
-  Team: {change['requester_team']} | Window: {change['requested_window']}
-  Rollback exists: {change['rollback_plan_exists']} | Tested: {change.get('rollback_plan_tested', 'None')}
-  Schedule conflict: {change.get('schedule_conflict', 'No')}
-  Description: {change.get('description', '(none)')}
-
-BACKEND-DERIVED HISTORICAL CONTEXT:
-  Similar past changes retrieved: {historical_context['similar_past_changes_count']}
-  Similar past change failure rate: {historical_context['similar_past_changes_failure_rate']}
-  Average system incidents in historical data: {historical_context['system_incidents_last_90_days']}
-
-EVIDENCE GATHERED:
-1. ML RISK MODEL:
-   Probability of failure = {ml['risk_probability']}
-   Model risk level = {ml['risk_level']}
-   Flags risky = {ml['model_flags_risky']}
-
-2. SIMILAR PAST CHANGES:
-{similar_txt}
-
-3. SYSTEM INCIDENT HISTORY:
-   {incidents['note']}
-
-4. SCHEDULE WINDOW:
-   {schedule['note']}
-
-5. ROLLBACK SAFETY:
-   {rollback['note']}
-
-6. ROLLBACK DOCUMENT VERIFICATION:
-   {document['note']}
-"""
-
-    # ---------------------------------------------------------
-    # 6. Authoritative deterministic risk policy
-    # ---------------------------------------------------------
-
-    policy = calculate_risk_policy(
-        ml,
-        change,
-        similar,
-        schedule,
-    )
-
-    # The deterministic policy is authoritative.
-    # The LLM is NOT allowed to change the recommendation
-    # or risk level.
-    policy_recommendation = policy["recommendation"]
-    policy_risk_level = policy["risk_level"]
-
-    # ---------------------------------------------------------
-    # 7. LLM explanation
-    # ---------------------------------------------------------
-
-    assessment_text = None
-
-    if os.environ.get("GROQ_API_KEY"):
-        try:
-            from langchain_groq import ChatGroq
-
-            _llm = ChatGroq(
-                model="openai/gpt-oss-120b",
-                temperature=0,
-            )
-
-            prompt = f"""You are ChangeGuard, an assistant to an IT Change Advisory Board.
+        prompt = f"""You are ChangeGuard, an assistant to an IT Change Advisory Board.
 
 Your role is to explain an already-determined risk decision.
 
 The authoritative deterministic risk policy has already calculated:
 
-RECOMMENDATION: {policy_recommendation}
-RISK LEVEL: {policy_risk_level}
+RECOMMENDATION: {policy['recommendation']}
+RISK LEVEL: {policy['risk_level']}
 
 You MUST NOT change, override, reinterpret, or recalculate the recommendation or risk level.
 
 Based ONLY on the evidence below, write a concise 2-4 sentence justification for the authoritative decision.
 
-{evidence}
+{evidence_text}
 
 Your response MUST use this exact format:
 
 JUSTIFICATION: <2-4 sentences using only facts supported by the evidence above.>
 """
 
-            response = _llm.invoke(prompt)
+        text = llm.invoke(prompt).content.strip()
 
-            llm_justification = response.content.strip()
+        # Remove the required prefix and keep the explanation.
+        if text.upper().startswith("JUSTIFICATION:"):
+            text = text[len("JUSTIFICATION:"):].strip()
 
-            # Groq may return the required JUSTIFICATION: prefix.
-            # Remove only that prefix and preserve the explanation.
-            if llm_justification.upper().startswith("JUSTIFICATION:"):
-                llm_justification = llm_justification[
-                    len("JUSTIFICATION:"):
-                ].strip()
+        if not text:
+            raise ValueError("LLM returned an empty justification.")
 
-            # Safety check: if the LLM returns no usable explanation,
-            # use the deterministic fallback explanation.
-            if not llm_justification:
-                raise ValueError(
-                    "LLM returned an empty justification."
-                )
+        return text, "llm"
 
-            assessment_text = (
-                f"RECOMMENDATION: {policy_recommendation}\n"
-                f"RISK LEVEL: {policy_risk_level}\n"
-                f"JUSTIFICATION: {llm_justification}"
-            )
-
-
-        except Exception as err:
-            print(
-                f"[ChangeGuard Agent Warning] "
-                f"LLM invocation failed ({err}). "
-                f"Using rule-grounded fallback."
-            )
-
-    # ---------------------------------------------------------
-    # 8. Fallback if LLM is unavailable
-    # ---------------------------------------------------------
-
-    explanation_source = "llm" if assessment_text else "fallback"
-
-    if not assessment_text:
-        assessment_text = generate_fallback_assessment(
-            change,
-            ml,
-            similar,
-            incidents,
-            schedule,
-            rollback,
+    except Exception as err:
+        print(
+            f"[ChangeGuard Agent Warning] LLM invocation failed ({err}). "
+            f"Using rule-grounded fallback."
         )
+        return None, "fallback"
+
+
+def evidence_text(header: str, ml: dict, similar: list, evidence: dict) -> str:
+    factors = "\n".join(
+        f"   - {f['label']} = {f['value']} ({f['direction']})"
+        for f in ml.get("factors", [])
+    )
+    sims = "\n".join(
+        f"   - {s['change_id']} ({s['system']}, {s.get('date', '')}): {s['outcome']}"
+        for s in similar
+    )
+    notes = "\n".join(
+        f"{i}. {key.upper()}: {value['note']}"
+        for i, (key, value) in enumerate(evidence.items(), start=4)
+    )
+
+    return f"""{header}
+
+EVIDENCE GATHERED:
+1. ML RISK MODEL ({'ApacheJIT code model' if ml['model'] == 'code' else 'Rabobank change model'}):
+   Probability = {ml['risk_probability']} ({ml['relative_risk']}x the average change)
+   Model risk level = {ml['risk_level']}
+
+2. TOP FACTORS (SHAP):
+{factors}
+
+3. MOST SIMILAR REAL HISTORICAL CHANGES:
+{sims}
+
+{notes}
+"""
+
+
+def finish(kind: str, change: dict, ml: dict, similar: list,
+           evidence: dict, schedule: dict, header: str) -> dict:
+    """Apply the policy, explain it, and package the result."""
+
+    policy = calculate_risk_policy(ml, change, similar, schedule)
+
+    justification, source = explain(policy, evidence_text(header, ml, similar, evidence))
+
+    if not justification:
+        justification = fallback_justification(ml, policy, evidence)
 
     return {
+        "kind": kind,
         "ml_prediction": ml,
         "similar_changes": similar,
-        "historical_context": historical_context,
-        "enriched_change": enriched_change,
-        "evidence": {
-            "incidents": incidents,
-            "schedule": schedule,
-            "rollback": rollback,
-            "document": document,
-        },
+        "evidence": evidence,
         "policy": policy,
-        "explanation_source": explanation_source,
-        "assessment": assessment_text,
-    }
-
-
-if __name__ == "__main__":
-    test = {
-        "system": "Payments-Service",
-        "change_type": "Database-Schema-Change",
-        "change_size": "Large",
-        "requester_team": "Backend",
-        "requested_window": "Peak-Hours",
-        "rollback_plan_exists": "No",
-        "rollback_plan_tested": "None",
-        "schedule_conflict": "Yes",
-        "description": (
-            "Adding a new column to the payments "
-            "transactions table."
+        "explanation_source": source,
+        "assessment": (
+            f"RECOMMENDATION: {policy['recommendation']}\n"
+            f"RISK LEVEL: {policy['risk_level']}\n"
+            f"JUSTIFICATION: {justification}"
         ),
     }
 
-    result = assess_change(test)
 
-    print("\n" + "=" * 60)
-    print("ML PREDICTION:", result["ml_prediction"])
-    print("=" * 60)
-    print("HISTORICAL CONTEXT:", result["historical_context"])
-    print("=" * 60)
-    print("RISK POLICY:", result["policy"])
-    print("=" * 60)
-    print(result["assessment"])
-    print("=" * 60)
+# -------------------------------------------------------------------
+# Change ticket (ITIL) assessment
+# -------------------------------------------------------------------
+
+def similar_tickets(ticket: dict) -> list:
+    b = ticket_risk.load()
+    frame = ticket_risk.to_frame(ticket, b["categories"])[ticket_risk.FEATURES]
+    return similarity.search(TICKET_INDEX_PATH, b["encoder"], b["meta"], frame)
+
+
+def assess_ticket(ticket: dict) -> dict:
+    """Run the full ChangeGuard assessment on one change ticket."""
+
+    ticket = prepare_ticket(ticket)
+
+    ml = ticket_risk.predict(ticket)
+    similar = similar_tickets(ticket)
+    incidents = get_incident_history(ticket)
+    schedule = check_schedule_conflict(ticket)
+
+    evidence = {
+        "similar": describe_similar(similar),
+        "incidents": incidents,
+        "schedule": schedule,
+        "rollback": get_rollback_status(
+            ticket["rollback_plan_exists"],
+            ticket.get("rollback_plan_tested", "None"),
+        ),
+        "document": describe_document_evidence(ticket),
+    }
+
+    header = f"""CHANGE TICKET:
+  Title: {ticket.get('title', '(untitled)')}
+  System: {ticket.get('ci_subtype')} ({ticket.get('ci_type')}) | Change type: {ticket.get('change_family')}
+  Risk classification: {ticket.get('risk_classification')} | Emergency: {'Yes' if ticket['emergency'] else 'No'}
+  Planned: {ticket.get('planned_hours')} h, {ticket.get('systems_affected')} system(s) affected
+  Rollback exists: {ticket['rollback_plan_exists']} | Tested: {ticket.get('rollback_plan_tested', 'None')}
+  Schedule conflict reported: {ticket.get('schedule_conflict', 'No')}
+  Description: {ticket.get('description') or '(none)'}"""
+
+    return finish("ticket", ticket, ml, similar, evidence, schedule, header)
+
+
+# -------------------------------------------------------------------
+# Code change (GitHub) assessment
+# -------------------------------------------------------------------
+
+def similar_commits(metrics: dict) -> list:
+    b = code_risk.load()
+    return similarity.search(
+        CODE_INDEX_PATH, b["encoder"], b["meta"], code_risk.to_frame(metrics)
+    )
+
+
+def code_rollback_readiness(analysis: dict) -> tuple[str, str, str]:
+    """Rollback readiness of a code change: (exists, tested, note).
+
+    Any commit can be rolled back with `git revert`, so the real risks
+    are schema migrations without a reverse path (data changes cannot be
+    reverted by reverting code) and changes shipped without tests.
+    """
+
+    details = analysis.get("analysis", {})
+    tested = "Yes" if details.get("touches_tests") else "No"
+    is_migration = analysis.get("change_type") == "Database-Schema-Change"
+    has_reverse = bool(details.get("detected_rollback_language"))
+
+    if is_migration and not has_reverse:
+        return (
+            "No",
+            "None",
+            "Touches database migrations/schema with no reverse migration "
+            "or rollback path in the diff - reverting the code will not "
+            "undo the data change.",
+        )
+
+    note = (
+        "Schema change includes a reverse migration / rollback path."
+        if is_migration
+        else "Code-only change - it can be rolled back by reverting the commit."
+    )
+    note += (
+        " Test files were updated alongside the change."
+        if tested == "Yes"
+        else " No test files were changed, so the change is not verified by tests."
+    )
+
+    return "Yes", tested, note
+
+
+def assess_code(analysis: dict, context: dict | None = None) -> dict:
+    """Assess a real GitHub commit / PR analysed by repo_change_analysis.
+
+    context: optional reviewer-supplied deployment details
+    (schedule_conflict, rollback document evidence).
+    """
+
+    context = context or {}
+    metrics = analysis["code_metrics"]
+    details = analysis.get("analysis", {})
+
+    rollback_exists, rollback_tested, rollback_note = code_rollback_readiness(analysis)
+
+    change = {
+        "title": analysis["description"],
+        "system": analysis["system"],
+        "rollback_plan_exists": rollback_exists,
+        "rollback_plan_tested": rollback_tested,
+        "schedule_conflict": context.get("schedule_conflict", "No"),
+        "rollback_document_provided": context.get("rollback_document_provided", False),
+        "rollback_document_verified": context.get("rollback_document_verified", False),
+    }
+
+    ml = code_risk.predict(metrics)
+    similar = similar_commits(metrics)
+
+    evidence = {
+        "similar": describe_similar(similar),
+        "diff": describe_code_change(
+            {"change_type": analysis.get("change_type"), **details}, metrics
+        ),
+        "rollback": {
+            "rollback_exists": rollback_exists,
+            "rollback_tested": rollback_tested,
+            "note": rollback_note,
+        },
+        "document": describe_document_evidence(change),
+    }
+
+    header = f"""CODE CHANGE:
+  Repository: {analysis['system']}
+  {analysis['description']}
+  Author: {details.get('author', 'unknown')} | Files: {metrics['nf']} | +{metrics['la']}/-{metrics['ld']} lines
+  Rollback evidence in diff: {analysis['rollback_plan_exists']} | Tests changed: {'Yes' if details.get('touches_tests') else 'No'}"""
+
+    result = finish("code", change, ml, similar, evidence, {}, header)
+    result["code_metrics"] = metrics
+    result["analysis"] = details
+    result["change"] = change
+
+    return result

@@ -1,696 +1,253 @@
 """
 ChangeGuard autonomous agent (LangGraph version).
 
-Unlike the fixed-sequence pipeline in agent.py, this agent LOOP lets the LLM
-decide which tools to call and in what order, and can call a tool again if
-needed, before producing a final recommendation.
-
-Phase 2:
-- The client provides only current change-request fields.
-- Historical ML features are derived by the backend.
-- The ML model receives the complete 11-feature enriched change.
+Unlike the fixed-sequence pipeline in agent.py, this agent LOOP lets the
+LLM decide which evidence tools to call, and in what order, before it
+writes its justification. The recommendation and risk level still come
+from the shared deterministic risk policy - the agent can only explain.
 """
 
-import os
 import json
 import operator
-from pathlib import Path
-from typing import TypedDict, Annotated, Sequence
+import os
 from contextvars import ContextVar
+from typing import Annotated, Sequence, TypedDict
 
 import truststore
 
 truststore.inject_into_ssl()
 
-from dotenv import load_dotenv
+import config  # noqa: F401  (loads .env, network settings)
+
 from langchain_core.messages import (
+    AIMessage,
     BaseMessage,
     HumanMessage,
     SystemMessage,
     ToolMessage,
-    AIMessage,
 )
 from langchain_core.tools import tool
-from langgraph.graph import StateGraph, END
+from langgraph.graph import END, StateGraph
 
-from predict import predict_risk
-from retrieval import find_similar_changes
-from tools import (
-    get_incident_history,
-    check_schedule_conflict,
-    get_rollback_status,
+import ticket_risk
+from agent import (
+    LLM_MODEL,
+    describe_document_evidence,
+    describe_similar,
+    fallback_justification,
+    prepare_ticket,
+    similar_tickets,
 )
-from build_index import change_to_text
-from context import derive_change_context
 from risk_policy import calculate_risk_policy
+from tools import check_schedule_conflict, get_incident_history, get_rollback_status
 
 
-# -------------------------------------------------------------------
-# Environment
-# -------------------------------------------------------------------
-
-load_dotenv(
-    dotenv_path=Path(__file__).parent.parent / ".env"
-)
-
-
-# -------------------------------------------------------------------
-# Request-scoped current change
-# -------------------------------------------------------------------
-# ContextVar gives each request/execution its own change context.
-# This prevents concurrent autonomous assessments from overwriting
-# each other's change data.
-
-_CURRENT_CHANGE: ContextVar[dict | None] = ContextVar(
-    "changeguard_current_change",
+# Each request gets its own ticket, so concurrent assessments never mix.
+_CURRENT_TICKET: ContextVar[dict | None] = ContextVar(
+    "changeguard_current_ticket",
     default=None,
 )
 
 
-def _get_current_change() -> dict:
-    """Return the current request's change data."""
+def _ticket() -> dict:
+    ticket = _CURRENT_TICKET.get()
 
-    change = _CURRENT_CHANGE.get()
+    if ticket is None:
+        raise RuntimeError("No active ChangeGuard request context.")
 
-    if change is None:
-        raise RuntimeError(
-            "No active ChangeGuard request context."
-        )
+    return ticket
 
-    return change
-
-
-# -------------------------------------------------------------------
-# System prompt
-# -------------------------------------------------------------------
 
 SYSTEM_PROMPT = """
 You are ChangeGuard, an autonomous agent assisting an IT Change Advisory Board.
 
-Your job is to gather evidence about the proposed change before producing a
-final assessment.
+Gather evidence about the proposed change with the available tools:
+- ml_risk_score: the risk model trained on real Rabobank change records
+- similar_past_changes: the most similar real historical changes and outcomes
+- incident_history: recent incidents on the affected system
+- schedule_conflicts: historical risk of the planned start day/hour
+- rollback_safety: rollback readiness
 
-Available evidence tools:
-- ml_risk_score
-- similar_past_changes
-- incident_history
-- schedule_conflicts
-- rollback_safety
-
-IMPORTANT EVIDENCE RULES:
-
+EVIDENCE RULES:
 1. You MUST call ml_risk_score.
-
-2. You MUST call similar_past_changes before making any statement about
-   similar historical changes, their outcomes, or their failure rate.
-
-3. You MUST call incident_history before making any statement about incidents
-   or historical failure rate for the affected system.
-
-4. You MUST call schedule_conflicts before making any statement about schedule
-   conflicts or historical risk of the requested window.
-
-5. You MUST call rollback_safety before making any statement about rollback
-   readiness or rollback safety.
-
-6. Do NOT invent, assume, or infer evidence that was not returned by a tool.
-
-7. The final justification may ONLY contain facts supported by:
-   - the original change request, or
-   - evidence returned by tools that you actually called.
-
-8. If evidence is needed but has not been gathered, call the appropriate tool
-   first.
-
-9. You may decide which additional tools are necessary, but gather all
-   evidence required to support every factual claim in your final
-   justification.
-
-10. Once enough evidence has been gathered, make NO further tool calls and
-    respond exactly in this format:
-
-RECOMMENDATION: <APPROVE / REVIEW / REJECT>
-RISK LEVEL: <Low / Medium / High>
-JUSTIFICATION: <2-4 sentences citing only evidence actually gathered>
+2. Call the tool that supports any fact before you state it.
+3. Never invent evidence that no tool returned.
+4. When you have enough evidence, stop calling tools.
 """
 
 
-# -------------------------------------------------------------------
-# LangGraph state
-# -------------------------------------------------------------------
+@tool
+def ml_risk_score() -> str:
+    """Risk model prediction for the current change, with its top factors."""
+
+    return json.dumps(ticket_risk.predict(_ticket()))
+
+
+@tool
+def similar_past_changes() -> str:
+    """The most similar real historical changes and what happened after them."""
+
+    return json.dumps(similar_tickets(_ticket()))
+
+
+@tool
+def incident_history() -> str:
+    """Recent incidents on the affected system and history for this system type."""
+
+    return json.dumps(get_incident_history(_ticket()))
+
+
+@tool
+def schedule_conflicts() -> str:
+    """Historical risk of changes started at the planned day and hour."""
+
+    return json.dumps(check_schedule_conflict(_ticket()))
+
+
+@tool
+def rollback_safety() -> str:
+    """Rollback readiness for the current change."""
+
+    t = _ticket()
+    return json.dumps(
+        get_rollback_status(t["rollback_plan_exists"], t.get("rollback_plan_tested", "None"))
+    )
+
+
+TOOLS = [ml_risk_score, similar_past_changes, incident_history, schedule_conflicts, rollback_safety]
+TOOLS_BY_NAME = {t.name: t for t in TOOLS}
+
 
 class AgentState(TypedDict):
     messages: Annotated[Sequence[BaseMessage], operator.add]
 
 
-# -------------------------------------------------------------------
-# LangChain tools
-# -------------------------------------------------------------------
+def run_agent_loop(ticket: dict, policy: dict, max_steps: int) -> tuple[str | None, list]:
+    """Let the LLM choose tools and write a justification.
 
-@tool
-def ml_risk_score() -> str:
-    """Get the ML model's predicted failure risk for the current change request."""
-
-    result = predict_risk(
-        _get_current_change()
-    )
-
-    return json.dumps(result)
-
-
-@tool
-def similar_past_changes(k: int = 5) -> str:
-    """Find the k most similar past changes and their real outcomes."""
-
-    change = _get_current_change()
-
-    query = change_to_text(
-        {
-            **change,
-            "description": change.get(
-                "description",
-                "",
-            ),
-        }
-    )
-
-    results = find_similar_changes(
-        query,
-        k=k,
-    )
-
-    return json.dumps(results)
-
-
-@tool
-def incident_history() -> str:
-    """Get historical incident information for the affected system."""
-
-    change = _get_current_change()
-
-    return json.dumps(
-        get_incident_history(
-            change["system"]
-        )
-    )
-
-
-@tool
-def schedule_conflicts() -> str:
-    """Check historical risk and scheduling conflicts for the requested window."""
-
-    change = _get_current_change()
-
-    return json.dumps(
-        check_schedule_conflict(
-            change["requested_window"]
-        )
-    )
-
-
-@tool
-def rollback_safety() -> str:
-    """Assess the rollback plan safety net for this change."""
-
-    change = _get_current_change()
-
-    return json.dumps(
-        get_rollback_status(
-            change["rollback_plan_exists"],
-            change.get(
-                "rollback_plan_tested",
-                "None",
-            ),
-        )
-    )
-
-
-TOOLS = [
-    ml_risk_score,
-    similar_past_changes,
-    incident_history,
-    schedule_conflicts,
-    rollback_safety,
-]
-
-
-TOOLS_BY_NAME = {
-    t.name: t
-    for t in TOOLS
-}
-
-
-# -------------------------------------------------------------------
-# Autonomous assessment
-# -------------------------------------------------------------------
-
-def assess_change_autonomous(
-    change: dict,
-    max_steps: int = 8,
-) -> dict:
-    """
-    Run the autonomous LangGraph agent.
-
-    The LLM may choose evidence tools, but the final recommendation
-    and risk level are always determined by the shared deterministic
-    ChangeGuard risk policy.
+    Returns (justification or None, tools actually called).
     """
 
-    # ---------------------------------------------------------------
-    # 1. Derive backend historical context
-    # ---------------------------------------------------------------
+    from langchain_groq import ChatGroq
 
-    historical_context = derive_change_context(
-        change
-    )
+    prompt = SYSTEM_PROMPT + f"""
 
-    # ---------------------------------------------------------------
-    # 2. Build complete 11-feature change
-    # ---------------------------------------------------------------
+The authoritative ChangeGuard risk policy has already decided:
 
-    enriched_change = {
-        **change,
-        **historical_context,
-    }
+RECOMMENDATION: {policy['recommendation']}
+RISK LEVEL: {policy['risk_level']}
 
-    _CURRENT_CHANGE.set(
-        enriched_change
-    )
+You MUST NOT change these values. Gather evidence, then reply ONLY with:
 
-    # ---------------------------------------------------------------
-    # 3. Gather authoritative deterministic evidence
-    # ---------------------------------------------------------------
-    # These values are used by the shared risk policy.
-    # The LLM may gather evidence independently for explanation,
-    # but it cannot override this decision.
-    # ---------------------------------------------------------------
-
-    query = change_to_text(
-        {
-            **change,
-            "description": change.get(
-                "description",
-                "",
-            ),
-        }
-    )
-
-    similar_changes = find_similar_changes(
-        query,
-        k=5,
-    )
-
-    schedule_data = check_schedule_conflict(
-        change["requested_window"]
-    )
-
-    ml_prediction = predict_risk(
-        enriched_change
-    )
-
-    # ---------------------------------------------------------------
-    # 4. Authoritative deterministic risk policy
-    # ---------------------------------------------------------------
-
-    policy = calculate_risk_policy(
-        ml_prediction,
-        change,
-        similar_changes,
-        schedule_data,
-    )
-
-    policy_recommendation = policy[
-        "recommendation"
-    ]
-
-    policy_risk_level = policy[
-        "risk_level"
-    ]
-
-    # ---------------------------------------------------------------
-    # 5. Autonomous LangGraph loop
-    # ---------------------------------------------------------------
-
-    tool_calls_made = []
-    llm_justification = None
-
-    if os.environ.get("GROQ_API_KEY"):
-
-        try:
-            from langchain_groq import ChatGroq
-
-            autonomous_prompt = SYSTEM_PROMPT + f"""
-
-IMPORTANT DECISION CONTROL:
-
-The authoritative ChangeGuard risk policy has already determined:
-
-RECOMMENDATION: {policy_recommendation}
-RISK LEVEL: {policy_risk_level}
-
-You MUST NOT change these values.
-
-You may use the available tools to gather evidence supporting
-the explanation.
-
-Your final response must contain ONLY:
-
-JUSTIFICATION: <2-4 sentences using only evidence actually gathered>
-
-Do not output RECOMMENDATION or RISK LEVEL.
-Do not create a different recommendation.
-Do not create a different risk level.
+JUSTIFICATION: <2-4 sentences using only evidence you actually gathered>
 """
 
-            llm = ChatGroq(
-                model="openai/gpt-oss-120b",
-                temperature=0,
-            ).bind_tools(
-                TOOLS
-            )
+    llm = ChatGroq(model=LLM_MODEL, temperature=0).bind_tools(TOOLS)
 
-            # -------------------------------------------------------
-            # Model node
-            # -------------------------------------------------------
+    def call_model(state: AgentState):
+        return {"messages": [llm.invoke([SystemMessage(content=prompt)] + list(state["messages"]))]}
 
-            def call_model(
-                state: AgentState,
-            ):
-                response = llm.invoke(
-                    [
-                        SystemMessage(
-                            content=autonomous_prompt
-                        )
-                    ]
-                    + list(state["messages"])
-                )
+    def call_tools(state: AgentState):
+        outputs = []
 
-                return {
-                    "messages": [response]
-                }
+        for call in state["messages"][-1].tool_calls:
+            if call["name"] not in TOOLS_BY_NAME:
+                raise ValueError(f"Unknown tool requested: {call['name']}")
 
-            # -------------------------------------------------------
-            # Tool node
-            # -------------------------------------------------------
+            outputs.append(ToolMessage(
+                content=str(TOOLS_BY_NAME[call["name"]].invoke(call["args"])),
+                tool_call_id=call["id"],
+                name=call["name"],
+            ))
 
-            def call_tools(
-                state: AgentState,
-            ):
-                last = state["messages"][-1]
+        return {"messages": outputs}
 
-                outputs = []
+    def should_continue(state: AgentState):
+        return "tools" if getattr(state["messages"][-1], "tool_calls", None) else "end"
 
-                for call in last.tool_calls:
-                    tool_name = call["name"]
+    graph = StateGraph(AgentState)
+    graph.add_node("agent", call_model)
+    graph.add_node("tools", call_tools)
+    graph.set_entry_point("agent")
+    graph.add_conditional_edges("agent", should_continue, {"tools": "tools", "end": END})
+    graph.add_edge("tools", "agent")
 
-                    if tool_name not in TOOLS_BY_NAME:
-                        raise ValueError(
-                            f"Unknown tool requested: {tool_name}"
-                        )
+    public = {k: v for k, v in ticket.items() if k not in ("weekday", "hour")}
 
-                    result = TOOLS_BY_NAME[
-                        tool_name
-                    ].invoke(
-                        call["args"]
-                    )
-
-                    outputs.append(
-                        ToolMessage(
-                            content=str(result),
-                            tool_call_id=call["id"],
-                            name=tool_name,
-                        )
-                    )
-
-                return {
-                    "messages": outputs
-                }
-
-            # -------------------------------------------------------
-            # Decide whether another tool round is required
-            # -------------------------------------------------------
-
-            def should_continue(
-                state: AgentState,
-            ):
-                last = state["messages"][-1]
-
-                if getattr(
-                    last,
-                    "tool_calls",
-                    None,
-                ):
-                    return "tools"
-
-                return "end"
-
-            # -------------------------------------------------------
-            # Build graph
-            # -------------------------------------------------------
-
-            graph = StateGraph(
-                AgentState
-            )
-
-            graph.add_node(
-                "agent",
-                call_model,
-            )
-
-            graph.add_node(
-                "tools",
-                call_tools,
-            )
-
-            graph.set_entry_point(
-                "agent"
-            )
-
-            graph.add_conditional_edges(
-                "agent",
-                should_continue,
-                {
-                    "tools": "tools",
-                    "end": END,
-                },
-            )
-
-            graph.add_edge(
-                "tools",
-                "agent",
-            )
-
-            compiled_graph = graph.compile()
-
-            # -------------------------------------------------------
-            # Initial request
-            # -------------------------------------------------------
-
-            initial = (
-                "Assess this change request:\n"
-                + json.dumps(
-                    change,
-                    indent=2,
-                )
-            )
-
-            state = {
-                "messages": [
-                    HumanMessage(
-                        content=initial
-                    )
-                ]
-            }
-
-            # -------------------------------------------------------
-            # Execute autonomous graph
-            # -------------------------------------------------------
-
-            result_state = compiled_graph.invoke(
-                state,
-                {
-                    "recursion_limit": max_steps * 2
-                },
-            )
-
-            # -------------------------------------------------------
-            # Record tools actually selected by LLM
-            # -------------------------------------------------------
-
-            for message in result_state["messages"]:
-
-                if (
-                    isinstance(
-                        message,
-                        AIMessage,
-                    )
-                    and getattr(
-                        message,
-                        "tool_calls",
-                        None,
-                    )
-                ):
-
-                    for call in message.tool_calls:
-                        tool_calls_made.append(
-                            call["name"]
-                        )
-
-            # -------------------------------------------------------
-            # Extract LLM justification only
-            # -------------------------------------------------------
-
-            final_content = (
-                result_state["messages"][-1]
-                .content
-            )
-
-            if isinstance(
-                final_content,
-                str,
-            ):
-
-                llm_justification = (
-                    final_content.strip()
-                )
-
-                if llm_justification.upper().startswith(
-                    "JUSTIFICATION:"
-                ):
-
-                    llm_justification = (
-                        llm_justification[
-                            len("JUSTIFICATION:"):
-                        ].strip()
-                    )
-
-                if not llm_justification:
-                    llm_justification = None
-
-        except Exception as err:
-
-            print(
-                "[ChangeGuard LangGraph Warning] "
-                f"Autonomous loop error ({err}). "
-                "Using deterministic fallback."
-            )
-
-    # ---------------------------------------------------------------
-    # 6. Deterministic fallback explanation
-    # ---------------------------------------------------------------
-
-    explanation_source = "llm" if llm_justification else "fallback"
-
-    if not llm_justification:
-
-        incidents = get_incident_history(
-            change["system"]
-        )
-
-        rollback = get_rollback_status(
-            change["rollback_plan_exists"],
-            change.get(
-                "rollback_plan_tested",
-                "None",
-            ),
-        )
-
-        justification_parts = []
-
-        prob = ml_prediction.get(
-            "risk_probability",
-            0.3,
-        )
-
-        justification_parts.append(
-            f"ML Model predicts a "
-            f"{round(prob * 100)}% failure risk "
-            f"for {change.get('system', 'this system')}."
-        )
-
-        failed_similar_count = policy[
-            "failed_similar_count"
-        ]
-
-        if len(similar_changes) > 0:
-
-            justification_parts.append(
-                f"Historical analysis of "
-                f"{len(similar_changes)} similar changes "
-                f"showed {failed_similar_count} "
-                f"past failures or incidents."
-            )
-
-        if incidents.get("note"):
-
-            justification_parts.append(
-                incidents["note"]
-            )
-
-        if not policy["has_rollback"]:
-
-            justification_parts.append(
-                "CRITICAL: No rollback plan is "
-                "present for this change."
-            )
-
-        elif not policy["tested_rollback"]:
-
-            justification_parts.append(
-                "Rollback plan is documented but "
-                "has not been tested in staging."
-            )
-
-        if policy["has_schedule_conflict"]:
-
-            justification_parts.append(
-                f"Scheduled during "
-                f"{change.get('requested_window', 'the requested window')} "
-                f"with a known scheduling risk."
-            )
-
-        if policy.get("evidence_mismatch"):
-
-            justification_parts.append(
-                "CRITICAL: A rollback plan document was uploaded but "
-                "does not substantiate a real rollback procedure."
-            )
-
-        llm_justification = " ".join(
-            justification_parts
-        )
-
-        # tool_calls_made is left as-is: it records only the tools the
-        # LLM actually chose. The deterministic fallback gathers its
-        # evidence directly and must not be reported as agent tool calls.
-
-    # ---------------------------------------------------------------
-    # 7. Final answer
-    # ---------------------------------------------------------------
-    # Recommendation and risk level ALWAYS come from
-    # calculate_risk_policy().
-    #
-    # The LLM can only provide the explanation.
-    # ---------------------------------------------------------------
-
-    final_text = (
-        f"RECOMMENDATION: "
-        f"{policy_recommendation}\n"
-        f"RISK LEVEL: "
-        f"{policy_risk_level}\n"
-        f"JUSTIFICATION: "
-        f"{llm_justification}"
+    result = graph.compile().invoke(
+        {"messages": [HumanMessage(content="Assess this change ticket:\n" + json.dumps(public, indent=2, default=str))]},
+        {"recursion_limit": max_steps * 2},
     )
 
+    called = [
+        call["name"]
+        for m in result["messages"]
+        if isinstance(m, AIMessage) and getattr(m, "tool_calls", None)
+        for call in m.tool_calls
+    ]
+
+    text = result["messages"][-1].content
+    if not isinstance(text, str):
+        return None, called
+
+    text = text.strip()
+    if text.upper().startswith("JUSTIFICATION:"):
+        text = text[len("JUSTIFICATION:"):].strip()
+
+    return (text or None), called
+
+
+def assess_change_autonomous(ticket: dict, max_steps: int = 8) -> dict:
+    """Autonomous assessment of a change ticket."""
+
+    ticket = prepare_ticket(ticket)
+    _CURRENT_TICKET.set(ticket)
+
+    # Authoritative evidence for the policy - computed deterministically,
+    # whatever the agent later decides to look at.
+    ml = ticket_risk.predict(ticket)
+    similar = similar_tickets(ticket)
+    schedule = check_schedule_conflict(ticket)
+    policy = calculate_risk_policy(ml, ticket, similar, schedule)
+
+    justification, tools_called = None, []
+
+    if os.environ.get("GROQ_API_KEY"):
+        try:
+            justification, tools_called = run_agent_loop(ticket, policy, max_steps)
+        except Exception as err:
+            print(f"[ChangeGuard LangGraph Warning] Autonomous loop error ({err}). Using fallback.")
+
+    source = "llm" if justification else "fallback"
+
+    evidence = {
+        "similar": describe_similar(similar),
+        "incidents": get_incident_history(ticket),
+        "schedule": schedule,
+        "rollback": get_rollback_status(
+            ticket["rollback_plan_exists"], ticket.get("rollback_plan_tested", "None")
+        ),
+        "document": describe_document_evidence(ticket),
+    }
+
+    if not justification:
+        # tools_called stays as recorded: the fallback gathers evidence
+        # directly and must not be reported as agent tool calls.
+        justification = fallback_justification(ml, policy, evidence)
+
     return {
-        "final_answer": final_text,
-        "tools_called": tool_calls_made,
-        "num_tool_calls": len(tool_calls_made),
-        "historical_context": historical_context,
-        "enriched_change": enriched_change,
-        "ml_prediction": ml_prediction,
-        "similar_changes": similar_changes,
-        "schedule": schedule_data,
+        "kind": "ticket",
+        "final_answer": (
+            f"RECOMMENDATION: {policy['recommendation']}\n"
+            f"RISK LEVEL: {policy['risk_level']}\n"
+            f"JUSTIFICATION: {justification}"
+        ),
+        "tools_called": tools_called,
+        "num_tool_calls": len(tools_called),
+        "ml_prediction": ml,
+        "similar_changes": similar,
+        "evidence": evidence,
+        "schedule": schedule,
         "policy": policy,
-        "explanation_source": explanation_source,
+        "explanation_source": source,
     }

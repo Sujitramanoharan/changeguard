@@ -1,83 +1,135 @@
 {
-  "model_version": "risk-model-v2",
-  "model_type": "Logistic Regression (sigmoid-calibrated)",
-  "trained_at": "2026-09-27 18:12 UTC",
-  "train_rows": 480,
-  "test_rows": 120,
-  "test_bad_rate": 0.217,
-  "roc_auc": 0.836,
-  "brier_score": 0.131,
-  "threshold": 0.285,
-  "accuracy": 0.817,
-  "precision": 0.571,
-  "recall": 0.615,
-  "f1": 0.593,
-  "calibration": [
-    {
-      "predicted": 0.078,
-      "observed": 0.0
+  "models": {
+    "ticket": {
+      "name": "Change-ticket risk model",
+      "dataset": "BPI Challenge 2014 - Rabobank Group ICT (real ITIL change & incident records)",
+      "label": "Incidents on the affected system rose in the 7 days after the change vs. the 7 days before",
+      "model_type": "LightGBM (gradient-boosted trees)",
+      "trained_at": "2026-09-29 09:31 UTC",
+      "split": "time-based: oldest 80% train, newest 20% test",
+      "train_rows": 20860,
+      "test_rows": 5216,
+      "test_period": "2014-02-18 to 2014-03-24",
+      "test_positive_rate": 0.035,
+      "roc_auc": 0.913,
+      "pr_auc": 0.348,
+      "brier_score": 0.0284,
+      "top10_precision": 0.238,
+      "top10_recall": 0.678,
+      "baselines": {
+        "Rabobank manual risk rating": 0.585,
+        "Recent incidents on the system only": 0.863
+      },
+      "mean_predicted": 0.0397,
+      "feature_importance": [
+        {
+          "feature": "Incidents on this system (last 30 days)",
+          "share": 0.489
+        },
+        {
+          "feature": "Planned duration (hours)",
+          "share": 0.16
+        },
+        {
+          "feature": "System subtype",
+          "share": 0.109
+        },
+        {
+          "feature": "Start hour",
+          "share": 0.079
+        },
+        {
+          "feature": "Start day",
+          "share": 0.053
+        },
+        {
+          "feature": "Systems affected",
+          "share": 0.043
+        },
+        {
+          "feature": "Change type",
+          "share": 0.021
+        },
+        {
+          "feature": "System type",
+          "share": 0.019
+        },
+        {
+          "feature": "Raised from",
+          "share": 0.011
+        },
+        {
+          "feature": "Risk classification",
+          "share": 0.008
+        },
+        {
+          "feature": "Scheduled downtime",
+          "share": 0.005
+        },
+        {
+          "feature": "CAB approval required",
+          "share": 0.003
+        },
+        {
+          "feature": "Emergency change",
+          "share": 0.0
+        }
+      ]
     },
-    {
-      "predicted": 0.132,
-      "observed": 0.083
-    },
-    {
-      "predicted": 0.183,
-      "observed": 0.167
-    },
-    {
-      "predicted": 0.243,
-      "observed": 0.25
-    },
-    {
-      "predicted": 0.411,
-      "observed": 0.583
+    "code": {
+      "name": "Code-change risk model",
+      "dataset": "ApacheJIT - 106,674 real commits from 15 Apache projects (CC-BY-4.0)",
+      "label": "Commit later identified as bug-inducing (SZZ over real Jira bug reports)",
+      "model_type": "LightGBM (gradient-boosted trees)",
+      "trained_at": "2026-09-29 09:23 UTC",
+      "split": "time-based: oldest 80% train, newest 20% test",
+      "train_rows": 85339,
+      "test_rows": 21335,
+      "test_period": "2017 to 2019",
+      "test_positive_rate": 0.164,
+      "roc_auc": 0.798,
+      "pr_auc": 0.44,
+      "brier_score": 0.1397,
+      "top20_precision": 0.423,
+      "top20_recall": 0.518,
+      "unseen_projects_roc_auc": 0.794,
+      "unseen_projects": [
+        "apache/kafka",
+        "apache/spark",
+        "apache/zookeeper",
+        "apache/zeppelin"
+      ],
+      "baselines": {
+        "Change size alone (lines added + deleted)": 0.777
+      },
+      "mean_predicted": 0.305,
+      "feature_importance": [
+        {
+          "feature": "Lines added",
+          "share": 0.574
+        },
+        {
+          "feature": "Lines deleted",
+          "share": 0.12
+        },
+        {
+          "feature": "Files changed",
+          "share": 0.114
+        },
+        {
+          "feature": "Top-level modules touched",
+          "share": 0.082
+        },
+        {
+          "feature": "Change spread (entropy)",
+          "share": 0.081
+        },
+        {
+          "feature": "Directories touched",
+          "share": 0.03
+        }
+      ]
     }
-  ],
-  "feature_influence": [
-    {
-      "feature": "rollback_plan_exists",
-      "coefficient": -0.995
-    },
-    {
-      "feature": "schedule_conflict",
-      "coefficient": 0.985
-    },
-    {
-      "feature": "similar_past_changes_failure_rate",
-      "coefficient": 0.731
-    },
-    {
-      "feature": "system_incidents_last_90_days",
-      "coefficient": -0.49
-    },
-    {
-      "feature": "change_size",
-      "coefficient": -0.469
-    },
-    {
-      "feature": "requested_window",
-      "coefficient": -0.45
-    },
-    {
-      "feature": "rollback_plan_tested",
-      "coefficient": -0.293
-    },
-    {
-      "feature": "change_type",
-      "coefficient": -0.154
-    },
-    {
-      "feature": "requester_team",
-      "coefficient": 0.085
-    },
-    {
-      "feature": "system",
-      "coefficient": 0.008
-    },
-    {
-      "feature": "similar_past_changes_count",
-      "coefficient": -0.002
-    }
-  ]
+  },
+  "model_version": "risk-models-v3-real-data"
 }

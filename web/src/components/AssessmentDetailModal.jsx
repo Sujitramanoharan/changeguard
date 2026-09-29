@@ -1,7 +1,8 @@
 import React, { useState } from "react";
 import Badge from "./Badge";
 import { api } from "../api";
-import { X, Server, Layers, Calendar, RotateCcw, Cpu, Copy, FileText, Activity, Gavel, ClipboardCheck } from "lucide-react";
+import { RiskGauge, FactorBars, SimilarList, EvidenceGrid, SectionTitle } from "./RiskInsights";
+import { X, Layers, Cpu, Copy, FileText, Gavel, ClipboardCheck, BarChart3, GitCommit, ClipboardList, ExternalLink } from "lucide-react";
 
 export default function AssessmentDetailModal({ item: initialItem, onClose, onUpdated }) {
   const [item, setItem] = useState(initialItem);
@@ -14,15 +15,15 @@ export default function AssessmentDetailModal({ item: initialItem, onClose, onUp
   };
 
   const details = item.details || {};
-  const ml = details.ml_prediction || { risk_probability: item.risk_probability || 0, risk_level: item.risk_level };
-  const similar = details.similar_changes || [];
-  const evidence = details.evidence || {};
+  const kind = details.kind || item.assessment_type || "ticket";
+  const ml = details.ml_prediction;
   const tools = details.tools_called || [];
+  const change = details.change || {};
 
   const copySummary = () => {
     const text = `ChangeGuard Risk Assessment
-System: ${item.system} (${item.change_type})
-Risk Level: ${item.risk_level}
+${kind === "code" ? "Code change" : "Change ticket"}: ${item.system} (${item.change_type})
+Risk Level: ${item.risk_level}${ml ? ` (${ml.relative_risk}x a typical change)` : ""}
 Recommendation: ${item.recommendation}
 Justification: ${item.justification}
 CAB Decision: ${item.cab_decision || "Pending"}${item.cab_decided_by ? ` (by ${item.cab_decided_by})` : ""}`;
@@ -30,46 +31,45 @@ CAB Decision: ${item.cab_decision || "Pending"}${item.cab_decided_by ? ` (by ${i
     alert("Assessment summary copied to clipboard!");
   };
 
-  const probPercent = Math.round((ml.risk_probability || 0) * 100);
-
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-in">
-      <div className="bg-white rounded-2xl shadow-2xl border border-slate-200/80 w-full max-w-3xl max-h-[90vh] overflow-hidden flex flex-col">
+      <div className="bg-white rounded-2xl shadow-2xl border border-slate-200/80 w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
         {/* Header */}
         <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-900 text-white">
-          <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl bg-indigo-600/30 border border-indigo-400/40 flex items-center justify-center text-indigo-400 font-bold">
-              <Activity className="w-5 h-5" />
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="w-9 h-9 rounded-xl bg-indigo-600/30 border border-indigo-400/40 flex items-center justify-center text-indigo-400">
+              {kind === "code" ? <GitCommit className="w-5 h-5" /> : <ClipboardList className="w-5 h-5" />}
             </div>
-            <div>
+            <div className="min-w-0">
               <div className="flex items-center gap-2">
                 <span className="text-xs text-slate-400 font-mono">ID #{item.id}</span>
                 <span className="text-xs px-2 py-0.5 rounded-full bg-slate-800 text-slate-300 font-medium">{item.created_at}</span>
+                <span className="text-xs px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 font-medium">
+                  {kind === "code" ? "Code change" : "Change ticket"}
+                </span>
               </div>
-              <h2 className="text-lg font-bold text-white tracking-tight">{item.system} &bull; {item.change_type}</h2>
+              <h2 className="text-lg font-bold text-white tracking-tight truncate">
+                {item.system} &bull; {item.change_type}
+              </h2>
             </div>
           </div>
-          <button
-            onClick={onClose}
-            className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
-          >
+          <button onClick={onClose} className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors">
             <X className="w-5 h-5" />
           </button>
         </div>
 
         {/* Scrollable Body */}
         <div className="p-6 overflow-y-auto space-y-6 flex-1 bg-slate-50/50">
-
-          {/* Top Result Card */}
-          <div className="bg-white p-5 rounded-xl border border-slate-200/80 shadow-xs flex flex-col md:flex-row gap-6 items-center justify-between">
+          {/* Decision + gauge */}
+          <div className="bg-white p-5 rounded-xl border border-slate-200/80 shadow-xs flex flex-col md:flex-row gap-6 items-start md:items-center justify-between">
             <div className="space-y-2">
-              <p className="text-xs font-bold text-slate-400 uppercase tracking-wider">Final Decision</p>
+              <p className="text-xs font-bold text-slate-400 uppercase tracking-wider">AI recommendation</p>
               <div className="flex items-center gap-3">
                 <Badge value={item.recommendation} />
                 <Badge value={item.risk_level} />
               </div>
               <p className="text-xs text-slate-500">
-                Mode: <span className="font-semibold text-slate-700 capitalize">{details.mode || "Controlled"} Engine</span>
+                Mode: <span className="font-semibold text-slate-700 capitalize">{details.mode || "controlled"}</span>
                 {details.explanation_source && (
                   <>
                     {" "}&bull; Explanation:{" "}
@@ -86,56 +86,27 @@ CAB Decision: ${item.cab_decision || "Pending"}${item.cab_decided_by ? ` (by ${i
                 </p>
               )}
             </div>
-
-            {/* Risk Gauge Bar */}
-            <div className="w-full md:w-64 bg-slate-50 p-3.5 rounded-xl border border-slate-200/60">
-              <div className="flex justify-between items-center text-xs mb-1.5">
-                <span className="font-semibold text-slate-600">ML Risk Probability</span>
-                <span className={`font-mono font-bold ${probPercent > 50 ? 'text-red-600' : probPercent > 25 ? 'text-amber-600' : 'text-emerald-600'}`}>
-                  {probPercent}%
-                </span>
-              </div>
-              <div className="w-full h-3 bg-slate-200 rounded-full overflow-hidden">
-                <div
-                  className={`h-full transition-all duration-500 rounded-full ${
-                    probPercent > 50 ? 'bg-gradient-to-r from-amber-500 to-red-600' : probPercent > 25 ? 'bg-gradient-to-r from-emerald-500 to-amber-500' : 'bg-emerald-500'
-                  }`}
-                  style={{ width: `${Math.max(probPercent, 6)}%` }}
-                ></div>
-              </div>
-              <div className="flex justify-between text-[10px] text-slate-400 mt-1">
-                <span>0% Safe</span>
-                <span>50%</span>
-                <span>100% Critical</span>
-              </div>
-            </div>
+            <RiskGauge ml={ml} />
           </div>
 
           {/* Human CAB decision */}
           <CabPanel item={item} onUpdated={handleUpdated} />
 
-          {/* Justification Box */}
+          {/* Justification */}
           <div className="bg-white p-5 rounded-xl border border-slate-200/80 shadow-xs">
-            <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 flex items-center gap-1.5">
-              <FileText className="w-4 h-4 text-indigo-600" />
-              AI Risk Justification Narrative
-            </h3>
-            <p className="text-sm text-slate-700 leading-relaxed font-sans bg-slate-50 p-4 rounded-lg border border-slate-200/60">
+            <SectionTitle icon={FileText}>Justification</SectionTitle>
+            <p className="text-sm text-slate-700 leading-relaxed bg-slate-50 p-4 rounded-lg border border-slate-200/60">
               {item.justification}
             </p>
           </div>
 
-          {/* Tools Logged (if autonomous) */}
+          {/* Tools (autonomous) */}
           {tools.length > 0 && (
             <div className="bg-white p-5 rounded-xl border border-slate-200/80 shadow-xs">
-              <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 flex items-center gap-1.5">
-                <Cpu className="w-4 h-4 text-indigo-600" />
-                LangGraph Autonomous Tool Execution Trail
-              </h3>
+              <SectionTitle icon={Cpu}>Tools the LangGraph agent chose to call</SectionTitle>
               <div className="flex flex-wrap gap-2">
                 {tools.map((t, idx) => (
-                  <span key={idx} className="text-xs font-mono bg-indigo-50 text-indigo-700 px-3 py-1 rounded-md border border-indigo-200/60 font-semibold flex items-center gap-1.5">
-                    <span className="w-1.5 h-1.5 rounded-full bg-indigo-500"></span>
+                  <span key={idx} className="text-xs font-mono bg-indigo-50 text-indigo-700 px-3 py-1 rounded-md border border-indigo-200/60 font-semibold">
                     {t}()
                   </span>
                 ))}
@@ -143,77 +114,62 @@ CAB Decision: ${item.cab_decision || "Pending"}${item.cab_decided_by ? ` (by ${i
             </div>
           )}
 
-          {/* Similar Past Changes (RAG) */}
-          {similar.length > 0 && (
-            <div className="bg-white p-5 rounded-xl border border-slate-200/80 shadow-xs">
-              <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3 flex items-center gap-1.5">
-                <Layers className="w-4 h-4 text-indigo-600" />
-                FAISS Vector RAG: Historical Match Analysis
-              </h3>
-              <div className="space-y-2">
-                {similar.map((s, idx) => (
-                  <div key={idx} className="flex items-center justify-between p-3 bg-slate-50 rounded-lg border border-slate-200/50 text-xs">
-                    <div>
-                      <span className="font-bold text-slate-800">{s.change_id}</span> &bull; <span className="text-slate-600">{s.change_type} on {s.system}</span>
-                      <span className="ml-2 font-mono text-[11px] text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded font-medium">
-                        {(s.similarity * 100).toFixed(0)}% match
-                      </span>
-                    </div>
-                    <OutcomeBadge value={s.outcome} />
-                  </div>
-                ))}
+          {/* Factors + similar */}
+          {ml?.factors && (
+            <div className="bg-white p-5 rounded-xl border border-slate-200/80 shadow-xs grid grid-cols-1 lg:grid-cols-2 gap-6">
+              <div>
+                <SectionTitle icon={BarChart3} hint="SHAP contributions from the trained model">Why this score</SectionTitle>
+                <FactorBars factors={ml.factors} />
+              </div>
+              <div>
+                <SectionTitle icon={Layers} hint={kind === "code" ? "Real Apache commits" : "Real Rabobank changes"}>
+                  Similar real changes
+                </SectionTitle>
+                <SimilarList similar={details.similar_changes} kind={kind} />
               </div>
             </div>
           )}
 
-          {/* Evidence Details Grid */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
-            <div className="bg-white p-4 rounded-xl border border-slate-200/80 shadow-xs">
-              <div className="flex items-center gap-2 text-xs font-semibold text-slate-500 mb-1">
-                <Server className="w-4 h-4 text-indigo-600" />
-                Incident History
-              </div>
-              <p className="text-xs text-slate-700 mt-1">{evidence.incidents?.note || "Checked system logs."}</p>
-            </div>
+          {/* Evidence */}
+          <div>
+            <SectionTitle>Evidence</SectionTitle>
+            <EvidenceGrid evidence={details.evidence} />
+          </div>
 
-            <div className="bg-white p-4 rounded-xl border border-slate-200/80 shadow-xs">
-              <div className="flex items-center gap-2 text-xs font-semibold text-slate-500 mb-1">
-                <Calendar className="w-4 h-4 text-amber-600" />
-                Schedule Window
-              </div>
-              <p className="text-xs text-slate-700 mt-1">{evidence.schedule?.note || item.requested_window}</p>
-            </div>
-
-            <div className="bg-white p-4 rounded-xl border border-slate-200/80 shadow-xs">
-              <div className="flex items-center gap-2 text-xs font-semibold text-slate-500 mb-1">
-                <RotateCcw className="w-4 h-4 text-emerald-600" />
-                Rollback Preparedness
-              </div>
-              <p className="text-xs text-slate-700 mt-1">{evidence.rollback?.note || `Plan exists: ${item.rollback_plan_exists}`}</p>
-            </div>
-
-            {evidence.document && (
-              <div className="bg-white p-4 rounded-xl border border-slate-200/80 shadow-xs">
-                <div className="flex items-center gap-2 text-xs font-semibold text-slate-500 mb-1">
-                  <FileText className="w-4 h-4 text-purple-600" />
-                  Document Verification
+          {/* Change details */}
+          <div className="bg-white p-5 rounded-xl border border-slate-200/80 shadow-xs">
+            <SectionTitle>{kind === "code" ? "Code change details" : "Change ticket details"}</SectionTitle>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
+              {(kind === "code"
+                ? [
+                    ["Repository", change.system],
+                    ["Author", details.analysis?.author],
+                    ["Size", item.change_size],
+                    ["Tests changed", details.analysis?.touches_tests ? "Yes" : "No"],
+                  ]
+                : [
+                    ["System", `${change.ci_subtype || ""} (${change.ci_type || ""})`],
+                    ["Planned start", item.requested_window],
+                    ["Duration", change.planned_hours ? `${change.planned_hours} h` : ""],
+                    ["Recent incidents", change.incidents_30d],
+                    ["Systems affected", change.systems_affected],
+                    ["Emergency", change.emergency ? "Yes" : "No"],
+                    ["Rollback exists", change.rollback_plan_exists],
+                    ["Rollback tested", change.rollback_plan_tested],
+                  ]
+              ).map(([label, value]) => (
+                <div key={label}>
+                  <span className="text-slate-400 block">{label}</span>
+                  <span className="font-semibold text-slate-700">{value ?? "-"}</span>
                 </div>
-                <p className="text-xs text-slate-700 mt-1">{evidence.document.note}</p>
-              </div>
+              ))}
+            </div>
+            {change.url && (
+              <a href={change.url} target="_blank" rel="noreferrer" className="mt-3 inline-flex items-center gap-1 text-xs font-semibold text-indigo-600 hover:underline">
+                View on GitHub <ExternalLink className="w-3 h-3" />
+              </a>
             )}
           </div>
-
-          {/* Change Payload Spec */}
-          <div className="bg-white p-5 rounded-xl border border-slate-200/80 shadow-xs">
-            <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">Change Request Details</h3>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
-              <div><span className="text-slate-400 block">Requester Team:</span> <span className="font-semibold text-slate-700">{item.requester_team}</span></div>
-              <div><span className="text-slate-400 block">Change Size:</span> <span className="font-semibold text-slate-700">{item.change_size}</span></div>
-              <div><span className="text-slate-400 block">Requested Window:</span> <span className="font-semibold text-slate-700">{item.requested_window}</span></div>
-              <div><span className="text-slate-400 block">Rollback Exists:</span> <span className="font-semibold text-slate-700">{item.rollback_plan_exists}</span></div>
-            </div>
-          </div>
-
         </div>
 
         {/* Footer Actions */}

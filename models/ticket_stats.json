@@ -1,0 +1,582 @@
+{
+  "base_rate": 0.0464,
+  "options": {
+    "ci_type": [
+      "computer",
+      "application",
+      "networkcomponents",
+      "database",
+      "software",
+      "applicationcomponent",
+      "subapplication",
+      "storage",
+      "hardware",
+      "no type",
+      "Phone",
+      "officeelectronics",
+      "displaydevice"
+    ],
+    "ci_subtype_by_type": {
+      "Phone": [
+        "Number"
+      ],
+      "application": [
+        "Server Based Application",
+        "Desktop Application",
+        "Web Based Application",
+        "SharePoint Farm",
+        "Standard Application",
+        "Citrix",
+        "VMWare",
+        "Exchange",
+        "SAP",
+        "Client Based Application"
+      ],
+      "applicationcomponent": [
+        "MQ Queue Manager"
+      ],
+      "computer": [
+        "Windows Server",
+        "Linux Server",
+        "Unix Server",
+        "ESX Cluster",
+        "Oracle Server",
+        "X86 Server",
+        "NonStop Server",
+        "zOS Server",
+        "ESX Server",
+        "Laptop",
+        "zOS Systeem",
+        "zOS Cluster",
+        "Windows Server in extern beheer",
+        "HSM Server",
+        "Hmc",
+        "Appliance",
+        "Desktop",
+        "Banking Device",
+        "zOS Controlling Lpar",
+        "NonStop Controler",
+        "zOS Coupling Facility",
+        "Vio",
+        "Footprint",
+        "Neoview Server",
+        "Omgeving",
+        "VDI",
+        "NonStop CPU",
+        "I/O Drawer"
+      ],
+      "database": [
+        "RAC Service",
+        "Instance",
+        "Database",
+        "Virtual Environment",
+        "Applicatie Database"
+      ],
+      "displaydevice": [
+        "Monitor"
+      ],
+      "hardware": [
+        "DataCenterEquipment",
+        "MigratieDummy",
+        "Encryption",
+        "Terminal"
+      ],
+      "networkcomponents": [
+        "Switch",
+        "Network Component",
+        "Protocol",
+        "Firewall",
+        "Net Device",
+        "Router",
+        "Lines",
+        "IPtelephony",
+        "LB",
+        "Trafic Stream"
+      ],
+      "no type": [
+        "no subtype"
+      ],
+      "officeelectronics": [
+        "Printer",
+        "Scanner"
+      ],
+      "software": [
+        "System Software",
+        "Automation Software",
+        "Server Based Application",
+        "Database Software",
+        "Security Software"
+      ],
+      "storage": [
+        "SAN",
+        "Switch",
+        "Controller",
+        "Tape Library",
+        "Virtual Tape Server",
+        "Neoview Server",
+        "NAS"
+      ],
+      "subapplication": [
+        "Server Based Application",
+        "Web Based Application",
+        "Citrix",
+        "Siebel",
+        "Standard Application"
+      ]
+    },
+    "change_family": [
+      "Standard Change Type",
+      "Standard Activity Type",
+      "Release Type",
+      "Master Change",
+      "Master Change Roadmap"
+    ],
+    "risk_classification": [
+      "Minor Change",
+      "Business Change",
+      "Major Business Change"
+    ],
+    "origin": [
+      "Problem",
+      "Incident"
+    ]
+  },
+  "rates": {
+    "weekday": {
+      "0": {
+        "rate": 0.0382,
+        "n": 5101
+      },
+      "1": {
+        "rate": 0.0376,
+        "n": 4971
+      },
+      "2": {
+        "rate": 0.0434,
+        "n": 4724
+      },
+      "3": {
+        "rate": 0.0419,
+        "n": 5160
+      },
+      "4": {
+        "rate": 0.0404,
+        "n": 4303
+      },
+      "5": {
+        "rate": 0.08,
+        "n": 862
+      },
+      "6": {
+        "rate": 0.1089,
+        "n": 955
+      }
+    },
+    "hour": {
+      "0": {
+        "rate": 0.0874,
+        "n": 1407
+      },
+      "1": {
+        "rate": 0.1294,
+        "n": 170
+      },
+      "2": {
+        "rate": 0.0702,
+        "n": 57
+      },
+      "3": {
+        "rate": 0.125,
+        "n": 8
+      },
+      "4": {
+        "rate": 0.0,
+        "n": 41
+      },
+      "5": {
+        "rate": 0.0559,
+        "n": 161
+      },
+      "6": {
+        "rate": 0.0832,
+        "n": 709
+      },
+      "7": {
+        "rate": 0.0562,
+        "n": 1832
+      },
+      "8": {
+        "rate": 0.0361,
+        "n": 3182
+      },
+      "9": {
+        "rate": 0.0367,
+        "n": 2669
+      },
+      "10": {
+        "rate": 0.04,
+        "n": 2553
+      },
+      "11": {
+        "rate": 0.0246,
+        "n": 1826
+      },
+      "12": {
+        "rate": 0.0346,
+        "n": 1562
+      },
+      "13": {
+        "rate": 0.0309,
+        "n": 1907
+      },
+      "14": {
+        "rate": 0.0334,
+        "n": 1736
+      },
+      "15": {
+        "rate": 0.0298,
+        "n": 1814
+      },
+      "16": {
+        "rate": 0.0364,
+        "n": 1319
+      },
+      "17": {
+        "rate": 0.052,
+        "n": 1020
+      },
+      "18": {
+        "rate": 0.0613,
+        "n": 799
+      },
+      "19": {
+        "rate": 0.0462,
+        "n": 238
+      },
+      "20": {
+        "rate": 0.1174,
+        "n": 230
+      },
+      "21": {
+        "rate": 0.0599,
+        "n": 451
+      },
+      "22": {
+        "rate": 0.0742,
+        "n": 229
+      },
+      "23": {
+        "rate": 0.0769,
+        "n": 156
+      }
+    },
+    "ci_subtype": {
+      "Appliance": {
+        "rate": 0.0,
+        "n": 26
+      },
+      "Applicatie Database": {
+        "rate": 0.0,
+        "n": 10
+      },
+      "Automation Software": {
+        "rate": 0.2148,
+        "n": 256
+      },
+      "Banking Device": {
+        "rate": 0.0,
+        "n": 20
+      },
+      "Citrix": {
+        "rate": 0.5422,
+        "n": 83
+      },
+      "Client Based Application": {
+        "rate": 0.1667,
+        "n": 12
+      },
+      "Controller": {
+        "rate": 0.0231,
+        "n": 173
+      },
+      "DataCenterEquipment": {
+        "rate": 0.0962,
+        "n": 478
+      },
+      "Database": {
+        "rate": 0.0,
+        "n": 236
+      },
+      "Database Software": {
+        "rate": 0.0,
+        "n": 57
+      },
+      "Desktop": {
+        "rate": 0.1304,
+        "n": 23
+      },
+      "Desktop Application": {
+        "rate": 0.0669,
+        "n": 807
+      },
+      "ESX Cluster": {
+        "rate": 0.0158,
+        "n": 316
+      },
+      "ESX Server": {
+        "rate": 0.0,
+        "n": 70
+      },
+      "Encryption": {
+        "rate": 0.0,
+        "n": 9
+      },
+      "Exchange": {
+        "rate": 0.4828,
+        "n": 29
+      },
+      "Firewall": {
+        "rate": 0.007,
+        "n": 285
+      },
+      "Footprint": {
+        "rate": 0.0,
+        "n": 9
+      },
+      "HSM Server": {
+        "rate": 0.0,
+        "n": 28
+      },
+      "Hmc": {
+        "rate": 0.0,
+        "n": 26
+      },
+      "I/O Drawer": {
+        "rate": 0.0,
+        "n": 1
+      },
+      "IPtelephony": {
+        "rate": 0.0,
+        "n": 5
+      },
+      "Instance": {
+        "rate": 0.001,
+        "n": 960
+      },
+      "LB": {
+        "rate": 0.0,
+        "n": 3
+      },
+      "Laptop": {
+        "rate": 0.42,
+        "n": 50
+      },
+      "Lines": {
+        "rate": 0.0,
+        "n": 48
+      },
+      "Linux Server": {
+        "rate": 0.0035,
+        "n": 2586
+      },
+      "MQ Queue Manager": {
+        "rate": 0.0,
+        "n": 1130
+      },
+      "MigratieDummy": {
+        "rate": 0.0581,
+        "n": 86
+      },
+      "Monitor": {
+        "rate": 0.0,
+        "n": 2
+      },
+      "NAS": {
+        "rate": 0.0,
+        "n": 2
+      },
+      "Neoview Server": {
+        "rate": 0.0,
+        "n": 10
+      },
+      "Net Device": {
+        "rate": 0.0459,
+        "n": 109
+      },
+      "Network Component": {
+        "rate": 0.0169,
+        "n": 1422
+      },
+      "NonStop CPU": {
+        "rate": 0.0,
+        "n": 2
+      },
+      "NonStop Controler": {
+        "rate": 0.0,
+        "n": 20
+      },
+      "NonStop Server": {
+        "rate": 0.0172,
+        "n": 174
+      },
+      "Number": {
+        "rate": 0.0,
+        "n": 122
+      },
+      "Omgeving": {
+        "rate": 0.0,
+        "n": 6
+      },
+      "Oracle Server": {
+        "rate": 0.0,
+        "n": 309
+      },
+      "Printer": {
+        "rate": 0.0,
+        "n": 16
+      },
+      "Protocol": {
+        "rate": 0.0,
+        "n": 1065
+      },
+      "RAC Service": {
+        "rate": 0.0009,
+        "n": 1139
+      },
+      "Router": {
+        "rate": 0.0,
+        "n": 51
+      },
+      "SAN": {
+        "rate": 0.0226,
+        "n": 221
+      },
+      "SAP": {
+        "rate": 0.52,
+        "n": 25
+      },
+      "Scanner": {
+        "rate": 0.0,
+        "n": 1
+      },
+      "Security Software": {
+        "rate": 0.0,
+        "n": 1
+      },
+      "Server Based Application": {
+        "rate": 0.132,
+        "n": 3977
+      },
+      "SharePoint Farm": {
+        "rate": 0.0348,
+        "n": 201
+      },
+      "Siebel": {
+        "rate": 0.0,
+        "n": 1
+      },
+      "Standard Application": {
+        "rate": 0.0763,
+        "n": 131
+      },
+      "Switch": {
+        "rate": 0.0077,
+        "n": 1699
+      },
+      "System Software": {
+        "rate": 0.0169,
+        "n": 1066
+      },
+      "Tape Library": {
+        "rate": 0.0,
+        "n": 62
+      },
+      "Terminal": {
+        "rate": 0.0,
+        "n": 6
+      },
+      "Trafic Stream": {
+        "rate": 0.0,
+        "n": 1
+      },
+      "Unix Server": {
+        "rate": 0.0,
+        "n": 1020
+      },
+      "VDI": {
+        "rate": 0.0,
+        "n": 3
+      },
+      "VMWare": {
+        "rate": 0.0488,
+        "n": 41
+      },
+      "Vio": {
+        "rate": 0.0,
+        "n": 9
+      },
+      "Virtual Environment": {
+        "rate": 0.0,
+        "n": 177
+      },
+      "Virtual Tape Server": {
+        "rate": 0.0,
+        "n": 29
+      },
+      "Web Based Application": {
+        "rate": 0.2357,
+        "n": 1031
+      },
+      "Windows Server": {
+        "rate": 0.0034,
+        "n": 3497
+      },
+      "Windows Server in extern beheer": {
+        "rate": 0.0,
+        "n": 32
+      },
+      "X86 Server": {
+        "rate": 0.0053,
+        "n": 189
+      },
+      "no subtype": {
+        "rate": 0.0129,
+        "n": 155
+      },
+      "zOS Cluster": {
+        "rate": 0.0,
+        "n": 44
+      },
+      "zOS Controlling Lpar": {
+        "rate": 0.0,
+        "n": 20
+      },
+      "zOS Coupling Facility": {
+        "rate": 0.0,
+        "n": 12
+      },
+      "zOS Server": {
+        "rate": 0.0,
+        "n": 108
+      },
+      "zOS Systeem": {
+        "rate": 0.0,
+        "n": 46
+      }
+    },
+    "risk_classification": {
+      "Business Change": {
+        "rate": 0.1401,
+        "n": 1406
+      },
+      "Major Business Change": {
+        "rate": 0.2687,
+        "n": 67
+      },
+      "Minor Change": {
+        "rate": 0.038,
+        "n": 24603
+      }
+    }
+  }
+}

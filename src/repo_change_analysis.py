@@ -14,6 +14,8 @@ import re
 
 import httpx
 
+from code_risk import metrics_from_files
+
 
 GITHUB_COMMIT_RE = re.compile(
     r"github\.com/(?P<owner>[^/]+)/(?P<repo>[^/]+)/commit/(?P<sha>[0-9a-fA-F]{7,40})"
@@ -154,13 +156,23 @@ def fetch_change(url: str) -> dict:
             resp.raise_for_status()
             pr = resp.json()
 
-            files_resp = client.get(
-                f"https://api.github.com/repos/{owner}/{repo}"
-                f"/pulls/{parsed['ref']}/files"
-            )
-            _raise_for_rate_limit(files_resp)
-            files_resp.raise_for_status()
-            files = files_resp.json()
+            # The files endpoint is paginated (max 100 per page, and
+            # GitHub stops at 3,000 files).
+            files = []
+
+            for page in range(1, 31):
+                files_resp = client.get(
+                    f"https://api.github.com/repos/{owner}/{repo}"
+                    f"/pulls/{parsed['ref']}/files",
+                    params={"per_page": 100, "page": page},
+                )
+                _raise_for_rate_limit(files_resp)
+                files_resp.raise_for_status()
+                batch = files_resp.json()
+                files.extend(batch)
+
+                if len(batch) < 100:
+                    break
 
             message = f"{pr['title']}\n\n{pr.get('body') or ''}".strip()
             author = pr["user"]["login"]
@@ -232,6 +244,8 @@ def analyze_change(change: dict) -> dict:
         "rollback_plan_tested": rollback_plan_tested,
         "schedule_conflict": "No",
         "description": f"[Auto-analyzed from {change['url']}] {description}",
+        # The same change metrics the code-risk model was trained on.
+        "code_metrics": metrics_from_files(files),
         "analysis": {
             "files_changed": len(files),
             "additions": additions,
