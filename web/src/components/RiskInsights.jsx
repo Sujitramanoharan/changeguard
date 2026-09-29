@@ -29,10 +29,10 @@ export function RiskGauge({ ml }) {
     <div className="p-4 rounded-xl bg-slate-50 border border-slate-200/70 min-w-[260px]">
       <div className="flex items-baseline justify-between gap-3">
         <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
-          Risk vs. a typical change
+          Model risk vs. a typical change
         </span>
         <span className="text-2xl font-extrabold font-mono text-slate-900">
-          {rel >= 10 ? rel.toFixed(0) : rel.toFixed(1)}×
+          {rel >= 10 ? rel.toFixed(0) : rel >= 1 ? rel.toFixed(1) : rel.toFixed(2)}×
         </span>
       </div>
 
@@ -55,6 +55,9 @@ export function RiskGauge({ ml }) {
         {(prob * 100).toFixed(1)}% predicted probability · typical change{" "}
         {((ml.base_rate ?? 0) * 100).toFixed(1)}% ·{" "}
         {ml.model === "code" ? "ApacheJIT code model" : "Rabobank change model"}
+      </p>
+      <p className="text-[10px] text-slate-400 mt-1">
+        The recommendation also weighs rollback readiness, timing and document evidence.
       </p>
     </div>
   );
@@ -109,14 +112,14 @@ export function SimilarList({ similar, kind }) {
   if (!similar?.length) return null;
 
   return (
-    <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
+    <div className="space-y-2">
       {similar.map((s) => (
         <div
           key={s.change_id}
           className="p-3 bg-slate-50 rounded-xl border border-slate-200/60 flex items-center justify-between gap-3 text-xs"
         >
           <div className="min-w-0">
-            <div className="flex items-center gap-1.5 font-bold text-slate-800">
+            <div className="flex items-center gap-1.5 font-bold text-slate-800 whitespace-nowrap">
               {kind === "code" ? <GitCommit className="w-3.5 h-3.5 text-slate-400" /> : null}
               {s.url ? (
                 <a

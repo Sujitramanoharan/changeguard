@@ -158,3 +158,28 @@ def test_saved_metrics_are_real_and_reasonable():
     # The model must beat the simple baselines it is compared against.
     assert metrics["ticket"]["roc_auc"] > max(metrics["ticket"]["baselines"].values())
     assert metrics["code"]["roc_auc"] > max(metrics["code"]["baselines"].values())
+
+
+@pytest.mark.parametrize("flag", ["emergency", "cab_required", "downtime"])
+def test_risk_flags_never_lower_risk(flag):
+    # Monotonic constraints: switching one of these on can only raise
+    # the predicted risk, for any kind of change.
+    stats = ticket_risk.load_stats()["options"]
+
+    for ci_type in stats["ci_type"][:6]:
+        for subtype in stats["ci_subtype_by_type"][ci_type][:3]:
+            ticket = agent.prepare_ticket({**BASE_TICKET, "ci_type": ci_type, "ci_subtype": subtype})
+            off = ticket_risk.predict({**ticket, flag: 0})["risk_probability"]
+            on = ticket_risk.predict({**ticket, flag: 1})["risk_probability"]
+
+            assert on >= off, (flag, ci_type, subtype)
+
+
+def test_more_incidents_never_lower_risk():
+    ticket = agent.prepare_ticket(BASE_TICKET)
+    probs = [
+        ticket_risk.predict({**ticket, "incidents_30d": n})["risk_probability"]
+        for n in (0, 1, 5, 20, 100)
+    ]
+
+    assert probs == sorted(probs)

@@ -30,11 +30,11 @@ CATEGORICAL = [
     "ci_type",
     "ci_subtype",
     "change_family",
-    "risk_classification",
     "origin",
 ]
 
 NUMERIC = [
+    "risk_rank",
     "incidents_30d",
     "planned_hours",
     "downtime",
@@ -47,11 +47,20 @@ NUMERIC = [
 
 FEATURES = CATEGORICAL + NUMERIC
 
+RISK_RANK = {"Minor Change": 0, "Business Change": 1, "Major Business Change": 2}
+
+# Domain knowledge the model must respect: these can only ever RAISE
+# risk. In the real data each of them does (e.g. emergency changes were
+# followed by more incidents 9.1% of the time vs 4.4%), but with only 88
+# emergency changes an unconstrained model learned the opposite.
+MONOTONE_INCREASING = {"risk_rank", "incidents_30d", "emergency", "cab_required", "downtime"}
+MONOTONE_CONSTRAINTS = [1 if f in MONOTONE_INCREASING else 0 for f in FEATURES]
+
 FEATURE_LABELS = {
     "ci_type": "System type",
     "ci_subtype": "System subtype",
     "change_family": "Change type",
-    "risk_classification": "Risk classification",
+    "risk_rank": "Risk classification",
     "origin": "Raised from",
     "incidents_30d": "Incidents on this system (last 30 days)",
     "planned_hours": "Planned duration (hours)",
@@ -125,6 +134,7 @@ def build_training_table(change_csv, incident_csv) -> pd.DataFrame:
         "ci_subtype": d["CI Subtype (aff)"].fillna("Unknown"),
         "change_family": d["Change Type"].fillna("").str.replace(r"\s*\d+$", "", regex=True),
         "risk_classification": d["Risk Assessment"].fillna("Minor Change"),
+        "risk_rank": d["Risk Assessment"].map(RISK_RANK).fillna(0).astype(int),
         "origin": d["Originated from"].fillna("Problem"),
         "incidents_30d": [count(x, s - pd.Timedelta(days=30), s)
                           for x, s in zip(ci, d["Actual Start"])],
@@ -172,6 +182,7 @@ def to_frame(ticket: dict, categories: dict) -> pd.DataFrame:
     """Turn one ticket dict into a single-row model input."""
 
     row = {f: ticket.get(f) for f in FEATURES}
+    row["risk_rank"] = RISK_RANK.get(ticket.get("risk_classification"), 0)
     X = pd.DataFrame([row])
 
     for col in CATEGORICAL:
@@ -229,6 +240,8 @@ def risk_summary(prob: float, base_rate: float) -> dict:
 
 
 def describe_value(feature: str, value) -> str:
+    if feature == "risk_rank":
+        return str(value)
     if feature == "weekday" and value is not None:
         try:
             return WEEKDAYS[int(value)]
@@ -252,7 +265,11 @@ def top_factors(ticket: dict, contrib, n: int = 5) -> list:
         {
             "feature": FEATURES[k],
             "label": FEATURE_LABELS[FEATURES[k]],
-            "value": describe_value(FEATURES[k], ticket.get(FEATURES[k])),
+            "value": describe_value(
+                FEATURES[k],
+                ticket.get("risk_classification") if FEATURES[k] == "risk_rank"
+                else ticket.get(FEATURES[k]),
+            ),
             "impact": round(float(contrib[k]), 3),
             "direction": "raises risk" if contrib[k] > 0 else "lowers risk",
         }

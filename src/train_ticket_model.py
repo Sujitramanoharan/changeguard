@@ -77,6 +77,8 @@ def train():
         subsample=0.8,
         subsample_freq=1,
         colsample_bytree=0.8,
+        monotone_constraints=tr.MONOTONE_CONSTRAINTS,
+        monotone_constraints_method="advanced",
         random_state=42,
         verbose=-1,
     )
@@ -98,7 +100,7 @@ def train():
         "name": "Change-ticket risk model",
         "dataset": "BPI Challenge 2014 - Rabobank Group ICT (real ITIL change & incident records)",
         "label": "Incidents on the affected system rose in the 7 days after the change vs. the 7 days before",
-        "model_type": "LightGBM (gradient-boosted trees)",
+        "model_type": "LightGBM (gradient-boosted trees, monotonic constraints)",
         "trained_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
         "split": "time-based: oldest 80% train, newest 20% test",
         "train_rows": int(len(train_df)),
