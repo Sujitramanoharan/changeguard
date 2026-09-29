@@ -150,7 +150,7 @@ export default function Layout() {
               <span>ML + FAISS + Policy</span>
 
               <span className="text-indigo-400">
-                v1.0.0
+                v2.0.0
               </span>
             </div>
           </div>
