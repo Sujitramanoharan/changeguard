@@ -1,21 +1,50 @@
 version: '3.8'
 
+# Production-like local stack: the app plus PostgreSQL, so users,
+# assessments and CAB decisions survive restarts.
+#
+#   docker compose up --build      ->  http://localhost:8000
+
 services:
+  db:
+    image: postgres:16-alpine
+    container_name: changeguard-db
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=changeguard
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-changeguard-local}
+      - POSTGRES_DB=changeguard
+    volumes:
+      - changeguard-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U changeguard"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
   changeguard:
     build:
       context: .
       dockerfile: Dockerfile
     container_name: changeguard-app
     restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
     ports:
       - "8000:7860"
     environment:
+      - DATABASE_URL=postgresql://changeguard:${POSTGRES_PASSWORD:-changeguard-local}@db:5432/changeguard
       - GROQ_API_KEY=${GROQ_API_KEY}
       - CHANGEGUARD_JWT_SECRET=${CHANGEGUARD_JWT_SECRET}
-      - CHANGEGUARD_DB_PATH=/app/data/changeguard.db
+      - ADMIN_USERNAME=${ADMIN_USERNAME:-}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-}
+      - REVIEWER_USERNAME=${REVIEWER_USERNAME:-}
+      - REVIEWER_PASSWORD=${REVIEWER_PASSWORD:-}
+      - GITHUB_TOKEN=${GITHUB_TOKEN:-}
+      - CHANGEGUARD_CI_API_KEY=${CHANGEGUARD_CI_API_KEY:-}
+      - SEED_DEMO_ON_EMPTY=true
       - CORS_ORIGINS=${CORS_ORIGINS:-http://localhost:8000}
-    volumes:
-      - changeguard-data:/app/data
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:7860/health"]
       interval: 30s
@@ -23,4 +52,4 @@ services:
       retries: 3
 
 volumes:
-  changeguard-data:
+  changeguard-pgdata:

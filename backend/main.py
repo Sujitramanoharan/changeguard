@@ -51,6 +51,7 @@ from backend.database import (
     record_cab_decision,
     record_actual_outcome,
     count_assessments,
+    describe_database,
 )
 
 
@@ -108,6 +109,7 @@ app.add_middleware(
 
 
 init_db()
+logger.info("Database: %s", describe_database())
 
 
 def bootstrap_user_from_env(

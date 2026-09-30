@@ -12,18 +12,18 @@ Every scenario runs through the real pipeline and real models:
 """
 
 import json
-import sqlite3
 from datetime import datetime, timedelta
 from pathlib import Path
 
 from agent import assess_code, assess_ticket
 
 from backend.database import (
-    DB_PATH,
+    clear_assessments,
     get_assessment_by_id,
     init_db,
     record_actual_outcome,
     record_cab_decision,
+    set_created_at,
 )
 from backend.records import record_assessment
 
@@ -104,11 +104,7 @@ def seed_demo_assessments():
     pipeline. Returns the number of assessments created."""
 
     init_db()
-
-    conn = sqlite3.connect(DB_PATH)
-    conn.execute("DELETE FROM assessments")
-    conn.commit()
-    conn.close()
+    clear_assessments()
 
     now = datetime.now()
     new_ids = []
@@ -149,20 +145,13 @@ def seed_demo_assessments():
         new_ids.append(saved["id"])
 
     # Backdate timestamps to look like activity over the last ~12 days.
-    conn = sqlite3.connect(DB_PATH)
     base = now - timedelta(days=12)
 
     for i, assessment_id in enumerate(new_ids):
         ts = (base + timedelta(days=i // 2)).replace(
             hour=10 if i % 2 == 0 else 15, minute=(i * 7) % 60, second=0, microsecond=0
         )
-        conn.execute(
-            "UPDATE assessments SET created_at = ? WHERE id = ?",
-            (ts.strftime("%Y-%m-%d %H:%M"), assessment_id),
-        )
-
-    conn.commit()
-    conn.close()
+        set_created_at(assessment_id, ts.strftime("%Y-%m-%d %H:%M"))
 
     # Give the older half a (clearly labelled) demo CAB decision - and,
     # for approved changes, a recorded outcome - so the feedback-loop

@@ -10,6 +10,12 @@ services:
     healthCheckPath: /health
     autoDeploy: true
     envVars:
+      # PostgreSQL, so users, assessments and CAB decisions survive
+      # restarts and redeploys.
+      - key: DATABASE_URL
+        fromDatabase:
+          name: changeguard-db
+          property: connectionString
       - key: CHANGEGUARD_JWT_SECRET
         generateValue: true
       - key: GROQ_API_KEY
@@ -25,9 +31,16 @@ services:
       # Optional: raises the GitHub API limit from 60 to 5,000 requests/hour.
       - key: GITHUB_TOKEN
         sync: false
-      # The free plan's disk is wiped on every restart/deploy; this
-      # repopulates the demo history automatically when the DB is empty.
+      # Shared secret the GitHub pull-request check sends (see
+      # .github/workflows/changeguard-pr-check.yml).
+      - key: CHANGEGUARD_CI_API_KEY
+        generateValue: true
+      # Seeds the demo history only when the database is empty.
       - key: SEED_DEMO_ON_EMPTY
         value: "true"
-      - key: CHANGEGUARD_DB_PATH
-        value: /app/data/changeguard.db
+
+databases:
+  - name: changeguard-db
+    plan: free
+    databaseName: changeguard
+    user: changeguard

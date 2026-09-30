@@ -59,6 +59,8 @@ pandas==3.0.5
 propcache==0.5.2
 pwdlib==0.2.1
 pycparser==3.0
+psycopg==3.3.6
+psycopg-binary==3.3.6
 pydantic-settings==2.15.0
 pydantic==2.13.5
 pydantic_core==2.46.5
