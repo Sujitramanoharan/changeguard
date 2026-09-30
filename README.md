@@ -59,7 +59,7 @@ language, and leaves the final decision to a human.
 | | Ticket model (Rabobank) | Code model (ApacheJIT) |
 |---|---|---|
 | Evaluation | newest 20% of changes (time split) | newest 20% of commits (time split) |
-| ROC-AUC | **0.919** | **0.798** |
+| ROC-AUC | **0.918** | **0.798** |
 | Unseen projects | – | **0.794** (4 repos never seen in training) |
 | Baseline | Rabobank's own manual risk rating: 0.585 | Commit size alone: 0.777 |
 | Operating point | riskiest 10% flagged → 75% of risky changes caught | riskiest 20% flagged → 52% of buggy commits caught |
@@ -79,6 +79,11 @@ Decisions made along the way, deliberately:
   raise risk. Unconstrained, the model learned from just 88 emergency
   changes that "emergency" *lowers* risk, contradicting the data (9.1% vs
   4.4%); with constraints AUC also improved (0.911 → 0.919).
+- Change type is fed to the model as its historical risk rate (learned
+  from the training period only) with the same constraint. As a plain
+  category the model showed "Release Type" *lowering* risk, although
+  releases raised incidents 9.3% of the time vs 4.6% for standard
+  changes. Cost: AUC 0.919 → 0.918.
 
 **Limitations:** the Rabobank label is inferred and partly reflects how
 incident-prone a system is, from one bank in 2013–14; SZZ labels are

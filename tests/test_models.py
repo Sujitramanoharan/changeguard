@@ -193,3 +193,18 @@ def test_rare_flags_do_not_dominate_similarity():
     similar = agent.similar_tickets(ticket)
 
     assert all(s["system"].startswith("Windows Server") for s in similar)
+
+
+def test_release_changes_never_look_safer_than_standard_changes():
+    # In the real data releases were followed by more incidents twice as
+    # often as standard changes; the model must never say the opposite.
+    stats = ticket_risk.load_stats()["options"]
+
+    for ci_type in stats["ci_type"][:6]:
+        subtype = stats["ci_subtype_by_type"][ci_type][0]
+        ticket = agent.prepare_ticket({**BASE_TICKET, "ci_type": ci_type, "ci_subtype": subtype})
+
+        standard = ticket_risk.predict({**ticket, "change_family": "Standard Change Type"})
+        release = ticket_risk.predict({**ticket, "change_family": "Release Type"})
+
+        assert release["risk_probability"] >= standard["risk_probability"], ci_type

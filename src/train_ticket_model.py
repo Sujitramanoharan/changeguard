@@ -58,12 +58,24 @@ def train():
     print("Building training table from BPIC 2014 ...")
     df = tr.build_training_table(BPIC_CHANGE_CSV, BPIC_INCIDENT_CSV)
 
+    cut = int(len(df) * 0.8)
+
+    # Change type -> its historical risk rate, learned from the training
+    # period only (smoothed towards the base rate for rare types).
+    train_part = df.iloc[:cut]
+    prior = float(train_part.risky.mean())
+    agg = train_part.groupby("change_family").risky.agg(["sum", "size"])
+    family_rates = {
+        str(k): round(float((v["sum"] + prior * 50) / (v["size"] + 50)), 4)
+        for k, v in agg.iterrows()
+    }
+    df["change_family_rate"] = df.change_family.map(family_rates).fillna(prior)
+
     for col in tr.CATEGORICAL:
         df[col] = df[col].astype("category")
 
     categories = {col: list(df[col].cat.categories) for col in tr.CATEGORICAL}
 
-    cut = int(len(df) * 0.8)
     train_df, test_df = df.iloc[:cut], df.iloc[cut:]
 
     print(f"Rows: {len(df)} | train {len(train_df)} | test {len(test_df)}")
@@ -154,6 +166,7 @@ def train():
         {
             "model": model,
             "categories": categories,
+            "family_rates": family_rates,
             "base_rate": round(base_rate, 4),
             "encoder": encoder,
             "meta": meta,

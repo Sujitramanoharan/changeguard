@@ -29,11 +29,15 @@ from config import TICKET_MODEL_PATH, TICKET_STATS_PATH
 CATEGORICAL = [
     "ci_type",
     "ci_subtype",
-    "change_family",
     "origin",
 ]
 
 NUMERIC = [
+    # Change type as its historical risk rate (from the training period
+    # only), so it can be constrained: an unconstrained categorical had
+    # "Release Type" lowering risk, although releases were followed by
+    # more incidents twice as often as standard changes.
+    "change_family_rate",
     "risk_rank",
     "incidents_30d",
     "planned_hours",
@@ -53,13 +57,15 @@ RISK_RANK = {"Minor Change": 0, "Business Change": 1, "Major Business Change": 2
 # risk. In the real data each of them does (e.g. emergency changes were
 # followed by more incidents 9.1% of the time vs 4.4%), but with only 88
 # emergency changes an unconstrained model learned the opposite.
-MONOTONE_INCREASING = {"risk_rank", "incidents_30d", "emergency", "cab_required", "downtime"}
+MONOTONE_INCREASING = {
+    "change_family_rate", "risk_rank", "incidents_30d", "emergency", "cab_required", "downtime",
+}
 MONOTONE_CONSTRAINTS = [1 if f in MONOTONE_INCREASING else 0 for f in FEATURES]
 
 FEATURE_LABELS = {
     "ci_type": "System type",
     "ci_subtype": "System subtype",
-    "change_family": "Change type",
+    "change_family_rate": "Change type",
     "risk_rank": "Risk classification",
     "origin": "Raised from",
     "incidents_30d": "Incidents on this system (last 30 days)",
@@ -178,15 +184,18 @@ def load_stats() -> dict:
     return json.loads(TICKET_STATS_PATH.read_text(encoding="utf-8"))
 
 
-def to_frame(ticket: dict, categories: dict) -> pd.DataFrame:
+def to_frame(ticket: dict, bundle: dict) -> pd.DataFrame:
     """Turn one ticket dict into a single-row model input."""
 
     row = {f: ticket.get(f) for f in FEATURES}
     row["risk_rank"] = RISK_RANK.get(ticket.get("risk_classification"), 0)
+    row["change_family_rate"] = bundle["family_rates"].get(
+        ticket.get("change_family"), bundle["base_rate"]
+    )
     X = pd.DataFrame([row])
 
     for col in CATEGORICAL:
-        X[col] = pd.Categorical(X[col], categories=categories[col])
+        X[col] = pd.Categorical(X[col], categories=bundle["categories"][col])
 
     for col in NUMERIC:
         X[col] = pd.to_numeric(X[col], errors="coerce").astype(float)
@@ -198,7 +207,7 @@ def predict(ticket: dict) -> dict:
     """Probability, relative risk and per-feature contributions for a ticket."""
 
     b = load()
-    X = to_frame(ticket, b["categories"])
+    X = to_frame(ticket, b)
 
     prob = float(b["model"].predict_proba(X)[0, 1])
 
@@ -240,7 +249,7 @@ def risk_summary(prob: float, base_rate: float) -> dict:
 
 
 def describe_value(feature: str, value) -> str:
-    if feature == "risk_rank":
+    if feature in ("risk_rank", "change_family_rate"):
         return str(value)
     if feature == "weekday" and value is not None:
         try:
@@ -267,8 +276,10 @@ def top_factors(ticket: dict, contrib, n: int = 5) -> list:
             "label": FEATURE_LABELS[FEATURES[k]],
             "value": describe_value(
                 FEATURES[k],
-                ticket.get("risk_classification") if FEATURES[k] == "risk_rank"
-                else ticket.get(FEATURES[k]),
+                {"risk_rank": ticket.get("risk_classification"),
+                 "change_family_rate": ticket.get("change_family")}.get(
+                    FEATURES[k], ticket.get(FEATURES[k])
+                ),
             ),
             "impact": round(float(contrib[k]), 3),
             "direction": "raises risk" if contrib[k] > 0 else "lowers risk",

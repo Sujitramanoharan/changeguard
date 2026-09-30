@@ -259,7 +259,7 @@ def finish(kind: str, change: dict, ml: dict, similar: list,
 
 def similar_tickets(ticket: dict) -> list:
     b = ticket_risk.load()
-    frame = ticket_risk.to_frame(ticket, b["categories"])[ticket_risk.FEATURES]
+    frame = ticket_risk.to_frame(ticket, b)[ticket_risk.FEATURES]
     return similarity.search(TICKET_INDEX_PATH, b["encoder"], b["meta"], frame)
 
 

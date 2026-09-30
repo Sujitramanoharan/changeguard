@@ -5,34 +5,34 @@
       "dataset": "BPI Challenge 2014 - Rabobank Group ICT (real ITIL change & incident records)",
       "label": "Incidents on the affected system rose in the 7 days after the change vs. the 7 days before",
       "model_type": "LightGBM (gradient-boosted trees, monotonic constraints)",
-      "trained_at": "2026-09-29 10:43 UTC",
+      "trained_at": "2026-09-30 07:10 UTC",
       "split": "time-based: oldest 80% train, newest 20% test",
       "train_rows": 20860,
       "test_rows": 5216,
       "test_period": "2014-02-18 to 2014-03-24",
       "test_positive_rate": 0.035,
-      "roc_auc": 0.919,
-      "pr_auc": 0.357,
-      "brier_score": 0.0279,
-      "top10_precision": 0.262,
-      "top10_recall": 0.749,
+      "roc_auc": 0.918,
+      "pr_auc": 0.351,
+      "brier_score": 0.028,
+      "top10_precision": 0.264,
+      "top10_recall": 0.754,
       "baselines": {
         "Rabobank manual risk rating": 0.585,
         "Recent incidents on the system only": 0.863
       },
-      "mean_predicted": 0.0408,
+      "mean_predicted": 0.041,
       "feature_importance": [
         {
           "feature": "Incidents on this system (last 30 days)",
-          "share": 0.416
+          "share": 0.422
         },
         {
           "feature": "Planned duration (hours)",
-          "share": 0.187
+          "share": 0.189
         },
         {
           "feature": "System subtype",
-          "share": 0.12
+          "share": 0.122
         },
         {
           "feature": "Start hour",
@@ -40,15 +40,11 @@
         },
         {
           "feature": "Start day",
-          "share": 0.059
+          "share": 0.063
         },
         {
           "feature": "Systems affected",
-          "share": 0.05
-        },
-        {
-          "feature": "Change type",
-          "share": 0.025
+          "share": 0.052
         },
         {
           "feature": "System type",
@@ -56,11 +52,15 @@
         },
         {
           "feature": "Raised from",
-          "share": 0.014
+          "share": 0.018
+        },
+        {
+          "feature": "Change type",
+          "share": 0.004
         },
         {
           "feature": "Risk classification",
-          "share": 0.004
+          "share": 0.003
         },
         {
           "feature": "Scheduled downtime",
@@ -68,7 +68,7 @@
         },
         {
           "feature": "CAB approval required",
-          "share": 0.002
+          "share": 0.001
         },
         {
           "feature": "Emergency change",
