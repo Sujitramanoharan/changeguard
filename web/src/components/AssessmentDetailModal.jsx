@@ -69,7 +69,10 @@ CAB Decision: ${item.cab_decision || "Pending"}${item.cab_decided_by ? ` (by ${i
                 <Badge value={item.risk_level} />
               </div>
               <p className="text-xs text-slate-500">
-                Mode: <span className="font-semibold text-slate-700 capitalize">{details.mode || "controlled"}</span>
+                Mode:{" "}
+                <span className="font-semibold text-slate-700 capitalize">
+                  {details.mode === "ci" ? "GitHub PR check" : details.mode || "controlled"}
+                </span>
                 {details.explanation_source && (
                   <>
                     {" "}&bull; Explanation:{" "}

@@ -1,0 +1,113 @@
+# ChangeGuard risk check for pull requests.
+#
+# Copy this file into any repository's .github/workflows/ folder, then in
+# that repository's Settings -> Secrets and variables -> Actions add:
+#   secret   CHANGEGUARD_API_KEY  = the CHANGEGUARD_CI_API_KEY value from the ChangeGuard server
+#   variable CHANGEGUARD_URL      = e.g. https://changeguard.onrender.com
+#
+# On every PR push it sends the changed-file list to ChangeGuard (the code
+# itself never leaves GitHub), and posts - or updates - one comment with
+# the risk assessment. Set FAIL_ON_REJECT to "true" and make this check
+# required in branch protection to block merging REJECTed changes.
+
+name: ChangeGuard risk check
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  changeguard:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Assess pull request with ChangeGuard
+        uses: actions/github-script@v7
+        env:
+          CHANGEGUARD_URL: ${{ vars.CHANGEGUARD_URL }}
+          CHANGEGUARD_API_KEY: ${{ secrets.CHANGEGUARD_API_KEY }}
+          FAIL_ON_REJECT: "false"
+        with:
+          script: |
+            const url = (process.env.CHANGEGUARD_URL || "").replace(/\/$/, "");
+            const key = process.env.CHANGEGUARD_API_KEY;
+
+            // Forks and unconfigured repos: skip instead of failing.
+            if (!url || !key) {
+              core.notice("ChangeGuard is not configured for this repository - skipping.");
+              return;
+            }
+
+            const pr = context.payload.pull_request;
+            const { owner, repo } = context.repo;
+
+            const files = await github.paginate(github.rest.pulls.listFiles, {
+              owner, repo, pull_number: pr.number, per_page: 100,
+            });
+
+            const payload = {
+              repo: `${owner}/${repo}`,
+              pr_number: pr.number,
+              url: pr.html_url,
+              title: pr.title || "",
+              body: (pr.body || "").slice(0, 20000),
+              author: pr.user.login,
+              files: files.slice(0, 3000).map((f) => ({
+                filename: f.filename,
+                additions: f.additions,
+                deletions: f.deletions,
+                patch: f.patch ? f.patch.slice(0, 200000) : null,
+              })),
+            };
+
+            // Free hosting tiers sleep when idle; retry while it wakes up.
+            let result;
+            for (let attempt = 1; attempt <= 3; attempt++) {
+              try {
+                const res = await fetch(`${url}/api/ci/pr-check`, {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json", "X-ChangeGuard-Key": key },
+                  body: JSON.stringify(payload),
+                  signal: AbortSignal.timeout(150000),
+                });
+                if (res.status === 401 || res.status === 503 || res.status === 422) {
+                  core.setFailed(`ChangeGuard rejected the request (${res.status}): ${await res.text()}`);
+                  return;
+                }
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                result = await res.json();
+                break;
+              } catch (err) {
+                core.warning(`ChangeGuard attempt ${attempt} failed: ${err.message}`);
+                if (attempt === 3) {
+                  core.setFailed("Could not reach ChangeGuard.");
+                  return;
+                }
+                await new Promise((r) => setTimeout(r, 15000));
+              }
+            }
+
+            // One comment per PR: update ours if it already exists.
+            const marker = "<!-- changeguard-pr-check -->";
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner, repo, issue_number: pr.number, per_page: 100,
+            });
+            const mine = comments.find((c) => c.body && c.body.includes(marker));
+
+            if (mine) {
+              await github.rest.issues.updateComment({ owner, repo, comment_id: mine.id, body: result.comment });
+            } else {
+              await github.rest.issues.createComment({ owner, repo, issue_number: pr.number, body: result.comment });
+            }
+
+            await core.summary.addRaw(result.comment).write();
+            core.info(`ChangeGuard: ${result.recommendation} (${result.relative_risk}x a typical change) - ${result.details_url}`);
+
+            if (process.env.FAIL_ON_REJECT === "true" && result.recommendation === "REJECT") {
+              core.setFailed("ChangeGuard recommends REJECT - a CAB decision is required before merging.");
+            }

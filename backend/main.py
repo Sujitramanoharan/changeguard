@@ -1,5 +1,6 @@
 """ChangeGuard FastAPI backend."""
 
+import hmac
 import json
 import logging
 import os
@@ -26,8 +27,9 @@ from agent import assess_code, assess_ticket
 from ticket_risk import load_stats
 from config import CORS_ORIGINS, APP_VERSION, METRICS_PATH
 from document_verification import verify_rollback_document
-from repo_change_analysis import RepoChangeError, analyze_github_url
+from repo_change_analysis import RepoChangeError, analyze_change, analyze_github_url
 
+from backend.pr_comment import build_pr_comment
 from backend.records import record_assessment
 
 from backend.auth import (
@@ -667,6 +669,99 @@ def assess_code_change(
         current_user,
         extra={"code_metrics": result["code_metrics"], "analysis": result["analysis"]},
     )
+
+
+class PullRequestFile(BaseModel):
+    """One changed file, as listed by GitHub's pull request files API."""
+
+    filename: str = Field(min_length=1, max_length=1000)
+    additions: int = Field(ge=0)
+    deletions: int = Field(ge=0)
+    patch: str | None = Field(default=None, max_length=200_000)
+
+
+class PullRequestCheck(BaseModel):
+    """A pull request sent by the ChangeGuard GitHub Actions workflow."""
+
+    repo: str = Field(min_length=3, max_length=200)
+    pr_number: int = Field(ge=1)
+    url: str = Field(min_length=1, max_length=500)
+    title: str = Field(default="", max_length=500)
+    body: str = Field(default="", max_length=20_000)
+    author: str = Field(default="unknown", max_length=100)
+    files: list[PullRequestFile] = Field(min_length=1, max_length=3000)
+
+
+def require_ci_key(request: Request) -> dict:
+    """Authenticate the GitHub Actions workflow by its shared secret."""
+
+    expected = os.getenv("CHANGEGUARD_CI_API_KEY", "")
+
+    if not expected:
+        raise HTTPException(
+            status_code=503,
+            detail="GitHub integration is not configured (set CHANGEGUARD_CI_API_KEY).",
+        )
+
+    supplied = request.headers.get("X-ChangeGuard-Key", "")
+
+    if not hmac.compare_digest(supplied.encode(), expected.encode()):
+        raise HTTPException(status_code=401, detail="Invalid ChangeGuard API key.")
+
+    return {"username": "github-actions", "role": "service"}
+
+
+@app.post("/api/ci/pr-check")
+def pull_request_check(
+    req: PullRequestCheck,
+    request: Request,
+    ci_user: dict = Depends(require_ci_key),
+):
+    """Assess a pull request for the GitHub Actions workflow.
+
+    The workflow sends the PR's file list (so private repositories work
+    without giving ChangeGuard access to the code). The PR is scored by
+    the same code model and policy as any other code change, saved to
+    the audit trail for a CAB decision, and returned as a ready-to-post
+    Markdown comment.
+    """
+
+    analysis = analyze_change({
+        "repo": req.repo,
+        "message": "\n\n".join(part for part in (req.title, req.body) if part)
+        or f"Pull request #{req.pr_number}",
+        "author": req.author,
+        "files": [f.model_dump() for f in req.files],
+        "url": req.url,
+    })
+
+    result = assess_code(analysis)
+
+    saved = record_assessment(
+        "code",
+        "ci",
+        {**result["change"], "url": req.url, "pr_number": req.pr_number},
+        result,
+        result["assessment"],
+        ci_user,
+        extra={"code_metrics": result["code_metrics"], "analysis": result["analysis"]},
+    )
+
+    details_url = f"{str(request.base_url).rstrip('/')}/history?id={saved['id']}"
+
+    logger.info(
+        "PR check | repo=%s | pr=%s | id=%s | recommendation=%s",
+        req.repo, req.pr_number, saved["id"], saved["recommendation"],
+    )
+
+    return {
+        "id": saved["id"],
+        "recommendation": saved["recommendation"],
+        "risk_level": saved["risk_level"],
+        "relative_risk": saved["ml_prediction"]["relative_risk"],
+        "details_url": details_url,
+        "comment": build_pr_comment(saved, details_url),
+    }
 
 
 @app.get("/api/history")

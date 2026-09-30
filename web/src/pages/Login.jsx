@@ -1,10 +1,11 @@
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { ShieldCheck } from "lucide-react";
 import { api } from "../api";
 
 export default function Login() {
   const navigate = useNavigate();
+  const location = useLocation();
 
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -20,7 +21,7 @@ export default function Login() {
 
     try {
       await api.login(username, password);
-      navigate("/", { replace: true });
+      navigate(location.state?.from || "/", { replace: true });
     } catch (err) {
       setError(err.message || "Login failed");
     } finally {

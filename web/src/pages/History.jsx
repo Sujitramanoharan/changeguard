@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { api } from "../api";
 import Badge from "../components/Badge";
 import AssessmentDetailModal from "../components/AssessmentDetailModal";
@@ -11,12 +12,23 @@ export default function History() {
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedItem, setSelectedItem] = useState(null);
 
-  const load = () =>
-    api.history().then(setRows).catch((err) => console.error(err)).finally(() => setLoading(false));
+  const [params] = useSearchParams();
+
+  // openId: an assessment to open once loaded (deep link from a PR comment).
+  const load = (openId) =>
+    api
+      .history()
+      .then((data) => {
+        setRows(data);
+        const match = openId && data.find((r) => r.id === openId);
+        if (match) setSelectedItem(match);
+      })
+      .catch((err) => console.error(err))
+      .finally(() => setLoading(false));
 
   useEffect(() => {
-    load();
-  }, []);
+    load(Number(params.get("id")));
+  }, [params]);
 
   const filtered = rows.filter((r) => {
     const matchesFilter = filter === "All" || r.risk_level === filter;
@@ -178,7 +190,7 @@ export default function History() {
 
       {/* Modal View */}
       {selectedItem && (
-        <AssessmentDetailModal item={selectedItem} onClose={() => setSelectedItem(null)} onUpdated={load} />
+        <AssessmentDetailModal item={selectedItem} onClose={() => setSelectedItem(null)} onUpdated={() => load()} />
       )}
     </div>
   );

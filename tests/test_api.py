@@ -327,3 +327,61 @@ def test_code_assessment_refetches_diff_server_side(client, monkeypatch):
     saved = client.get(f"/api/assessments/{body['id']}", headers=headers).json()
     assert saved["assessment_type"] == "code"
     assert saved["change_type"] == "Code change"
+
+
+# -------------------------------------------------------------------
+# GitHub pull-request check
+# -------------------------------------------------------------------
+
+PR = {
+    "repo": "acme/payments",
+    "pr_number": 42,
+    "url": "https://github.com/acme/payments/pull/42",
+    "title": "Add split payments column",
+    "body": "Adds a nullable column.",
+    "author": "dev",
+    "files": [
+        {"filename": "db/migrations/0042_split.sql", "additions": 30, "deletions": 0},
+        {"filename": "app/payments.py", "additions": 60, "deletions": 10},
+    ],
+}
+
+
+def test_pr_check_is_disabled_without_configured_key(client, monkeypatch):
+    monkeypatch.delenv("CHANGEGUARD_CI_API_KEY", raising=False)
+
+    assert client.post("/api/ci/pr-check", json=PR).status_code == 503
+
+
+def test_pr_check_rejects_missing_or_wrong_key(client, monkeypatch):
+    monkeypatch.setenv("CHANGEGUARD_CI_API_KEY", "s3cret-key")
+
+    assert client.post("/api/ci/pr-check", json=PR).status_code == 401
+    assert client.post(
+        "/api/ci/pr-check", json=PR, headers={"X-ChangeGuard-Key": "wrong"}
+    ).status_code == 401
+
+
+def test_pr_check_assesses_and_returns_comment(client, monkeypatch):
+    monkeypatch.setenv("CHANGEGUARD_CI_API_KEY", "s3cret-key")
+    monkeypatch.delenv("GROQ_API_KEY", raising=False)
+
+    resp = client.post("/api/ci/pr-check", json=PR, headers={"X-ChangeGuard-Key": "s3cret-key"})
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["recommendation"] in ("APPROVE", "REVIEW", "REJECT")
+    assert "<!-- changeguard-pr-check -->" in body["comment"]
+    assert f"#{body['id']}" in body["comment"]
+    assert body["details_url"].endswith(f"/history?id={body['id']}")
+
+    # Migration file with no reverse path -> no rollback, so not approved.
+    assert body["recommendation"] != "APPROVE"
+
+    # Saved to the audit trail as a GitHub PR check, awaiting a CAB decision.
+    _, headers = make_user("reviewer")
+    saved = client.get(f"/api/assessments/{body['id']}", headers=headers).json()
+    assert saved["assessment_type"] == "code"
+    assert saved["mode"] == "ci"
+    assert saved["details"]["user"]["username"] == "github-actions"
+    assert saved["cab_decision"] is None

@@ -91,6 +91,34 @@ imperfect and commit size explains much of the code signal; recent
 ApacheJIT commits are under-labelled. An organisation should retrain on
 its own history.
 
+## GitHub pull-request check
+
+`.github/workflows/changeguard-pr-check.yml` runs ChangeGuard on every pull
+request and posts (then keeps updating) one comment with the verdict, the
+top risk factors, the most similar real commits and a link to record the
+CAB decision. The PR also appears in History as a code assessment awaiting
+a decision.
+
+- Only the changed-file list is sent - the code never leaves GitHub - so
+  private repositories work too.
+- Setup in the repository to check (Settings → Secrets and variables →
+  Actions): secret `CHANGEGUARD_API_KEY` (must equal the server's
+  `CHANGEGUARD_CI_API_KEY`) and variable `CHANGEGUARD_URL`.
+- Set `FAIL_ON_REJECT: "true"` and make the check required in branch
+  protection to block merging REJECTed changes until the CAB decides.
+
+## Database
+
+PostgreSQL when `DATABASE_URL` is set (users, assessments and CAB
+decisions survive restarts and redeploys), otherwise a local SQLite file.
+Existing SQLite databases are upgraded in place. `docker compose up` runs
+the app with a Postgres container; `render.yaml` provisions a Render
+Postgres database. To run the test suite against Postgres:
+
+```bash
+TEST_DATABASE_URL=postgresql://user:pass@localhost:5432/test pytest tests/
+```
+
 ## Architecture
 
 ```
@@ -176,8 +204,10 @@ startup.
 
 Free-plan notes:
 
-- The disk is wiped on every restart/deploy; `SEED_DEMO_ON_EMPTY=true`
-  re-creates the demo history on startup (1–2 minutes).
+- Without `DATABASE_URL` the free plan's disk is wiped on every
+  restart/deploy; attach a Postgres database to keep data.
+  `SEED_DEMO_ON_EMPTY=true` seeds the demo history only when the database
+  is empty (1–2 minutes).
 - The service sleeps after ~15 minutes idle; the first request takes about
   a minute.
 - The app uses ~330 MB of memory, within the 512 MB free tier.

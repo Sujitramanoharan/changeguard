@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from "react-router-dom";
 import Layout from "./components/Layout";
 import Dashboard from "./pages/Dashboard";
 import NewAssessment from "./pages/NewAssessment";
@@ -9,8 +9,11 @@ import Users from "./pages/Users";
 import { api } from "./api";
 
 function ProtectedRoute({ children }) {
+  const location = useLocation();
+
   if (!api.isAuthenticated()) {
-    return <Navigate to="/login" replace />;
+    // Remember where the user was going (e.g. a link from a PR comment).
+    return <Navigate to="/login" replace state={{ from: location.pathname + location.search }} />;
   }
 
   return children;
