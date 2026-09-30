@@ -27,7 +27,7 @@ jobs:
 
     steps:
       - name: Assess pull request with ChangeGuard
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         env:
           CHANGEGUARD_URL: ${{ vars.CHANGEGUARD_URL }}
           CHANGEGUARD_API_KEY: ${{ secrets.CHANGEGUARD_API_KEY }}
