@@ -54,6 +54,7 @@ from backend.database import (
     record_actual_outcome,
     count_assessments,
     describe_database,
+    IS_POSTGRES,
 )
 
 
@@ -1056,6 +1057,9 @@ def health():
         "status": "ok",
         "app": "ChangeGuard",
         "version": APP_VERSION,
+        # Which store is active - never the URL or credentials.
+        "database": "postgresql" if IS_POSTGRES else "sqlite",
+        "github_integration": bool(os.getenv("CHANGEGUARD_CI_API_KEY")),
     }
 
 
