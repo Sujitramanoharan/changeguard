@@ -21,7 +21,10 @@ export default function Login() {
 
     try {
       await api.login(username, password);
-      navigate(location.state?.from || "/", { replace: true });
+      const next = location.state?.from || new URLSearchParams(location.search).get("next");
+      // Only same-site paths: never send a user to another site after login.
+      const safe = next && next.startsWith("/") && !next.startsWith("//") ? next : "/";
+      navigate(safe, { replace: true });
     } catch (err) {
       setError(err.message || "Login failed");
     } finally {

@@ -31,7 +31,12 @@ function clearSession() {
 async function handleResponse(res) {
   if (res.status === 401) {
     clearSession();
-    window.location.href = "/login";
+    // Keep the page the user was on (e.g. a PR comment link) so login
+    // can return to it - an expired session must not lose the link.
+    const next = window.location.pathname + window.location.search;
+    window.location.href = next.startsWith("/login")
+      ? "/login"
+      : `/login?next=${encodeURIComponent(next)}`;
     throw new Error("Authentication required");
   }
 
