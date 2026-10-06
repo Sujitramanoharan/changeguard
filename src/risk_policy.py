@@ -114,6 +114,14 @@ def calculate_risk_policy(
         recommendation = "REVIEW"
         risk_level = "Medium"
 
+    # Text written to manipulate the reviewer (flagged by RedTeamGPT, see
+    # prompt_guard.py) says nothing about technical risk, so it does not
+    # move the score - but a person must look at a change that contains it.
+    prompt_injection = bool(change.get("prompt_injection_flagged"))
+    if prompt_injection and recommendation == "APPROVE":
+        recommendation = "REVIEW"
+        risk_level = "Medium"
+
     return {
         "score": round(score, 3),
         "recommendation": recommendation,
@@ -132,4 +140,5 @@ def calculate_risk_policy(
         "rollback_document_provided": rollback_doc_provided,
         "rollback_document_verified": rollback_doc_verified,
         "evidence_mismatch": evidence_mismatch,
+        "prompt_injection": prompt_injection,
     }

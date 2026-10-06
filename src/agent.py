@@ -10,6 +10,8 @@ Two kinds of change, one decision process:
             \\                      /
              rollback readiness + uploaded document check
                          |
+          RedTeamGPT screens the free text (prompt_guard)
+                         |
           deterministic risk policy (authoritative)
                          |
           LLM writes the explanation only (rule-based fallback)
@@ -24,6 +26,7 @@ from datetime import datetime
 import config  # noqa: F401  (loads .env, network settings)
 
 import code_risk
+import prompt_guard
 import similarity
 import ticket_risk
 from config import CODE_INDEX_PATH, TICKET_INDEX_PATH
@@ -143,13 +146,13 @@ def fallback_justification(ml: dict, policy: dict, evidence: dict) -> str:
     return " ".join(parts)
 
 
-def explain(policy: dict, evidence_text: str) -> tuple[str | None, str]:
+def explain(policy: dict, evidence_text: str, llm_allowed: bool = True) -> tuple[str | None, str]:
     """Ask the LLM to explain an already-made decision.
 
     Returns (justification or None, source).
     """
 
-    if not os.environ.get("GROQ_API_KEY"):
+    if not llm_allowed or not os.environ.get("GROQ_API_KEY"):
         return None, "fallback"
 
     try:
@@ -227,13 +230,29 @@ EVIDENCE GATHERED:
 """
 
 
+def screen_free_text(fields: dict, change: dict, evidence: dict) -> dict:
+    """Run RedTeamGPT over the user-written fields and record the result."""
+
+    guard = prompt_guard.screen(fields)
+    change["prompt_injection_flagged"] = prompt_guard.is_flagged(guard)
+
+    if guard["status"] != "not_configured":
+        evidence["security"] = {"status": guard["status"], "note": guard["note"]}
+
+    return guard
+
+
 def finish(kind: str, change: dict, ml: dict, similar: list,
-           evidence: dict, schedule: dict, header: str) -> dict:
+           evidence: dict, schedule: dict, header: str, guard: dict) -> dict:
     """Apply the policy, explain it, and package the result."""
 
     policy = calculate_risk_policy(ml, change, similar, schedule)
 
-    justification, source = explain(policy, evidence_text(header, ml, similar, evidence))
+    justification, source = explain(
+        policy,
+        evidence_text(header, ml, similar, evidence),
+        llm_allowed=prompt_guard.llm_allowed(guard),
+    )
 
     if not justification:
         justification = fallback_justification(ml, policy, evidence)
@@ -245,6 +264,7 @@ def finish(kind: str, change: dict, ml: dict, similar: list,
         "evidence": evidence,
         "policy": policy,
         "explanation_source": source,
+        "prompt_guard": guard,
         "assessment": (
             f"RECOMMENDATION: {policy['recommendation']}\n"
             f"RISK LEVEL: {policy['risk_level']}\n"
@@ -284,16 +304,22 @@ def assess_ticket(ticket: dict) -> dict:
         "document": describe_document_evidence(ticket),
     }
 
+    guard = screen_free_text(
+        {"title": ticket.get("title"), "description": ticket.get("description")}, ticket, evidence
+    )
+    title = prompt_guard.safe_text("title", ticket.get("title", "(untitled)"), guard)
+    description = prompt_guard.safe_text("description", ticket.get("description") or "(none)", guard)
+
     header = f"""CHANGE TICKET:
-  Title: {ticket.get('title', '(untitled)')}
+  Title: {title}
   System: {ticket.get('ci_subtype')} ({ticket.get('ci_type')}) | Change type: {ticket.get('change_family')}
   Risk classification: {ticket.get('risk_classification')} | Emergency: {'Yes' if ticket['emergency'] else 'No'}
   Planned: {ticket.get('planned_hours')} h, {ticket.get('systems_affected')} system(s) affected
   Rollback exists: {ticket['rollback_plan_exists']} | Tested: {ticket.get('rollback_plan_tested', 'None')}
   Schedule conflict reported: {ticket.get('schedule_conflict', 'No')}
-  Description: {ticket.get('description') or '(none)'}"""
+  Description: {description}"""
 
-    return finish("ticket", ticket, ml, similar, evidence, schedule, header)
+    return finish("ticket", ticket, ml, similar, evidence, schedule, header, guard)
 
 
 # -------------------------------------------------------------------
@@ -382,13 +408,20 @@ def assess_code(analysis: dict, context: dict | None = None) -> dict:
         "document": describe_document_evidence(change),
     }
 
+    # Screen the whole stored message (title and body): only its first line
+    # reaches the LLM, but a manipulation attempt anywhere in it matters to the CAB.
+    guard = screen_free_text(
+        {"message": details.get("commit_message") or analysis["description"]}, change, evidence
+    )
+    message = prompt_guard.safe_text("message", analysis["description"], guard)
+
     header = f"""CODE CHANGE:
   Repository: {analysis['system']}
-  {analysis['description']}
+  {message}
   Author: {details.get('author', 'unknown')} | Files: {metrics['nf']} | +{metrics['la']}/-{metrics['ld']} lines
   Rollback evidence in diff: {analysis['rollback_plan_exists']} | Tests changed: {'Yes' if details.get('touches_tests') else 'No'}"""
 
-    result = finish("code", change, ml, similar, evidence, {}, header)
+    result = finish("code", change, ml, similar, evidence, {}, header, guard)
     result["code_metrics"] = metrics
     result["analysis"] = details
     result["change"] = change

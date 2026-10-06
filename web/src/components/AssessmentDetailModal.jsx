@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import Badge from "./Badge";
 import { api } from "../api";
-import { RiskGauge, FactorBars, SimilarList, EvidenceGrid, SectionTitle } from "./RiskInsights";
+import { RiskGauge, FactorBars, SimilarList, EvidenceGrid, SectionTitle, screeningLabel } from "./RiskInsights";
 import { X, Layers, Cpu, Copy, FileText, Gavel, ClipboardCheck, BarChart3, GitCommit, ClipboardList, ExternalLink } from "lucide-react";
 
 export default function AssessmentDetailModal({ item: initialItem, onClose, onUpdated }) {
@@ -78,6 +78,14 @@ CAB Decision: ${item.cab_decision || "Pending"}${item.cab_decided_by ? ` (by ${i
                     {" "}&bull; Explanation:{" "}
                     <span className="font-semibold text-slate-700">
                       {details.explanation_source === "llm" ? "LLM (Groq)" : "Rule-based fallback"}
+                    </span>
+                  </>
+                )}
+                {details.prompt_guard && (
+                  <>
+                    {" "}&bull; Prompt screening:{" "}
+                    <span className={`font-semibold ${details.prompt_guard.status === "flagged" ? "text-rose-700" : "text-slate-700"}`}>
+                      {screeningLabel(details.prompt_guard)}
                     </span>
                   </>
                 )}

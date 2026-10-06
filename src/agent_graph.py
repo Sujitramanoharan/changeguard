@@ -29,6 +29,7 @@ from langchain_core.messages import (
 from langchain_core.tools import tool
 from langgraph.graph import END, StateGraph
 
+import prompt_guard
 import ticket_risk
 from agent import (
     LLM_MODEL,
@@ -122,7 +123,7 @@ class AgentState(TypedDict):
     messages: Annotated[Sequence[BaseMessage], operator.add]
 
 
-def run_agent_loop(ticket: dict, policy: dict, max_steps: int) -> tuple[str | None, list]:
+def run_agent_loop(ticket: dict, policy: dict, max_steps: int, guard: dict | None = None) -> tuple[str | None, list]:
     """Let the LLM choose tools and write a justification.
 
     Returns (justification or None, tools actually called).
@@ -173,6 +174,9 @@ JUSTIFICATION: <2-4 sentences using only evidence you actually gathered>
     graph.add_edge("tools", "agent")
 
     public = {k: v for k, v in ticket.items() if k not in ("weekday", "hour")}
+    for field in ("title", "description"):
+        if field in public:
+            public[field] = prompt_guard.safe_text(field, public[field], guard or {})
 
     result = graph.compile().invoke(
         {"messages": [HumanMessage(content="Assess this change ticket:\n" + json.dumps(public, indent=2, default=str))]},
@@ -201,6 +205,8 @@ def assess_change_autonomous(ticket: dict, max_steps: int = 8) -> dict:
     """Autonomous assessment of a change ticket."""
 
     ticket = prepare_ticket(ticket)
+    guard = prompt_guard.screen({"title": ticket.get("title"), "description": ticket.get("description")})
+    ticket["prompt_injection_flagged"] = prompt_guard.is_flagged(guard)
     _CURRENT_TICKET.set(ticket)
 
     # Authoritative evidence for the policy - computed deterministically,
@@ -212,9 +218,9 @@ def assess_change_autonomous(ticket: dict, max_steps: int = 8) -> dict:
 
     justification, tools_called = None, []
 
-    if os.environ.get("GROQ_API_KEY"):
+    if os.environ.get("GROQ_API_KEY") and prompt_guard.llm_allowed(guard):
         try:
-            justification, tools_called = run_agent_loop(ticket, policy, max_steps)
+            justification, tools_called = run_agent_loop(ticket, policy, max_steps, guard)
         except Exception as err:
             print(f"[ChangeGuard LangGraph Warning] Autonomous loop error ({err}). Using fallback.")
 
@@ -229,6 +235,8 @@ def assess_change_autonomous(ticket: dict, max_steps: int = 8) -> dict:
         ),
         "document": describe_document_evidence(ticket),
     }
+    if guard["status"] != "not_configured":
+        evidence["security"] = {"status": guard["status"], "note": guard["note"]}
 
     if not justification:
         # tools_called stays as recorded: the fallback gathers evidence
@@ -250,4 +258,5 @@ def assess_change_autonomous(ticket: dict, max_steps: int = 8) -> dict:
         "schedule": schedule,
         "policy": policy,
         "explanation_source": source,
+        "prompt_guard": guard,
     }
