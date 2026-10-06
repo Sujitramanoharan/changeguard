@@ -11,5 +11,8 @@ export default defineConfig({
   },
   build: {
     outDir: '../frontend_dist',
+    // outDir is outside web/, so Vite won't clear it unless told to;
+    // without this every build left its old bundles behind.
+    emptyOutDir: true,
   },
 })
