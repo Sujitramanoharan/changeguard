@@ -20,3 +20,7 @@ if os.environ.get("TEST_DATABASE_URL"):
 else:
     os.environ.pop("DATABASE_URL", None)
 os.environ.setdefault("CHANGEGUARD_JWT_SECRET", "test-secret")
+
+# Prompt screening calls a separate RedTeamGPT service; tests mock it
+# explicitly and must never reach a real one configured in .env.
+os.environ["REDTEAMGPT_URL"] = ""

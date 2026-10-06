@@ -1060,6 +1060,7 @@ def health():
         # Which store is active - never the URL or credentials.
         "database": "postgresql" if IS_POSTGRES else "sqlite",
         "github_integration": bool(os.getenv("CHANGEGUARD_CI_API_KEY")),
+        "prompt_screening": bool(os.getenv("REDTEAMGPT_URL", "").strip()),
     }
 
 

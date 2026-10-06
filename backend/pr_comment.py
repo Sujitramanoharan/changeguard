@@ -7,6 +7,7 @@ MARKER = "<!-- changeguard-pr-check -->"
 ICONS = {"APPROVE": "✅", "REVIEW": "⚠️", "REJECT": "⛔"}
 
 EVIDENCE_TITLES = {
+    "security": "Prompt security (RedTeamGPT)",
     "diff": "What the diff touches",
     "rollback": "Rollback readiness",
     "similar": "Similar changes",

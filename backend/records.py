@@ -81,6 +81,7 @@ def record_assessment(
         "evidence": result["evidence"],
         "policy": policy,
         "explanation_source": result["explanation_source"],
+        "prompt_guard": result.get("prompt_guard"),
         "recommendation": rec,
         "risk_level": lvl,
         "justification": jus,

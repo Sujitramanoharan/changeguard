@@ -8,6 +8,7 @@ import {
   SimilarList,
   EvidenceGrid,
   SectionTitle,
+  screeningLabel,
 } from "../components/RiskInsights";
 import {
   Cpu,
@@ -622,6 +623,7 @@ export default function NewAssessment() {
                 ["Model", result.kind === "code" ? "ApacheJIT code model" : "Rabobank change model"],
                 ["Mode", result.mode],
                 ["Explanation", result.explanation_source === "llm" ? "LLM (Groq)" : "Rule-based fallback"],
+                ["Prompt screening", screeningLabel(result.prompt_guard)],
                 ["CAB decision", "Pending"],
               ].map(([k, v]) => (
                 <div key={k} className="flex justify-between gap-3 border-b border-slate-800 pb-2">
@@ -686,6 +688,13 @@ function ResultPanel({ result }) {
         </div>
         <RiskGauge ml={ml} />
       </div>
+
+      {result.prompt_guard?.status === "flagged" && (
+        <div className="bg-rose-50 border border-rose-300 text-rose-900 p-4 rounded-xl text-sm flex items-start gap-2">
+          <AlertTriangle className="w-5 h-5 text-rose-600 flex-shrink-0 mt-0.5" />
+          <span>{result.evidence?.security?.note}</span>
+        </div>
+      )}
 
       <div>
         <SectionTitle icon={FileSearch}>Justification</SectionTitle>

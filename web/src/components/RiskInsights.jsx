@@ -8,6 +8,7 @@ import {
   RotateCcw,
   FileText,
   GitCommit,
+  ShieldAlert,
 } from "lucide-react";
 
 /** How risky this change is compared with a typical historical change. */
@@ -162,6 +163,7 @@ const EVIDENCE = [
   { key: "similar", title: "Similar changes", icon: Layers, tone: "text-purple-600" },
   { key: "rollback", title: "Rollback readiness", icon: RotateCcw, tone: "text-emerald-600" },
   { key: "document", title: "Rollback document", icon: FileText, tone: "text-purple-600" },
+  { key: "security", title: "Prompt security (RedTeamGPT)", icon: ShieldAlert, tone: "text-rose-600" },
 ];
 
 /** Deterministic evidence notes gathered by the tools. */
@@ -173,7 +175,12 @@ export function EvidenceGrid({ evidence }) {
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
       {cards.map(({ key, title, icon: Icon, tone }) => (
-        <div key={key} className="p-3.5 bg-white rounded-xl border border-slate-200/80 shadow-xs">
+        <div
+          key={key}
+          className={`p-3.5 rounded-xl border shadow-xs ${
+            evidence[key].status === "flagged" ? "bg-rose-50 border-rose-300" : "bg-white border-slate-200/80"
+          }`}
+        >
           <div className="flex items-center gap-2 text-xs font-semibold text-slate-500 mb-1">
             <Icon className={`w-4 h-4 ${tone}`} />
             {title}
@@ -183,6 +190,15 @@ export function EvidenceGrid({ evidence }) {
       ))}
     </div>
   );
+}
+
+/** One-line status of the RedTeamGPT prompt screening. */
+export function screeningLabel(guard) {
+  return {
+    clean: "RedTeamGPT: clean",
+    flagged: "RedTeamGPT: injection flagged",
+    unavailable: "RedTeamGPT unreachable (LLM skipped)",
+  }[guard?.status] || "Off";
 }
 
 export function SectionTitle({ icon: Icon, children, hint }) {

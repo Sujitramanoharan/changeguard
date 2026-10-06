@@ -35,6 +35,13 @@ services:
       # .github/workflows/changeguard-pr-check.yml).
       - key: CHANGEGUARD_CI_API_KEY
         generateValue: true
+      # Optional: RedTeamGPT screens ticket and PR text for prompt
+      # injection before the LLM sees it (src/prompt_guard.py). Leave
+      # REDTEAMGPT_URL empty to turn screening off.
+      - key: REDTEAMGPT_URL
+        sync: false
+      - key: REDTEAMGPT_API_KEY
+        sync: false
       # Seeds the demo history only when the database is empty.
       - key: SEED_DEMO_ON_EMPTY
         value: "true"

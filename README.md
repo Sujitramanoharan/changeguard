@@ -99,13 +99,34 @@ top risk factors, the most similar real commits and a link to record the
 CAB decision. The PR also appears in History as a code assessment awaiting
 a decision.
 
-- Only the changed-file list is sent - the code never leaves GitHub - so
-  private repositories work too.
+- The workflow sends the changed-file list with line counts and each
+  file's diff, so ChangeGuard needs no access to the repository and
+  private repositories work too. The model scores only the counts; the
+  diff text is scanned for rollback / reverse-migration steps.
 - Setup in the repository to check (Settings → Secrets and variables →
   Actions): secret `CHANGEGUARD_API_KEY` (must equal the server's
   `CHANGEGUARD_CI_API_KEY`) and variable `CHANGEGUARD_URL`.
 - Set `FAIL_ON_REJECT: "true"` and make the check required in branch
   protection to block merging REJECTed changes until the CAB decides.
+
+## Prompt-injection screening (RedTeamGPT)
+
+The ticket title and description, and a commit or PR message, are the only
+parts of an LLM prompt that whoever submits the change controls. When
+`REDTEAMGPT_URL` (and `REDTEAMGPT_API_KEY`) are set, ChangeGuard sends that
+text to [RedTeamGPT](https://github.com/Sujitramanoharan/redteamgpt), a
+prompt-injection firewall, before any LLM reads it:
+
+| Screening result | What ChangeGuard does |
+|---|---|
+| clean | The LLM sees the text as before. |
+| flagged | The flagged text is withheld from the LLM, a red "Prompt security" evidence card explains why, and the change is never auto-approved (at least REVIEW). The risk score itself is unchanged: manipulative text is not technical risk. |
+| unreachable | Fail closed: no unscreened text reaches the LLM; the explanation is rule-based. |
+
+The deterministic policy already decides the verdict, so an injection could
+never approve a change; screening also keeps it out of the explanation the
+CAB reads, and records the attempt in the audit trail. `/health` reports
+`prompt_screening: true` when it is configured.
 
 ## Database
 
