@@ -27,6 +27,7 @@ from agent import assess_code, assess_ticket
 from ticket_risk import load_stats
 from config import CORS_ORIGINS, APP_VERSION, METRICS_PATH
 from document_verification import verify_rollback_document
+from monitoring import monitoring_report
 from repo_change_analysis import RepoChangeError, analyze_change, analyze_github_url
 
 from backend.pr_comment import build_pr_comment
@@ -928,6 +929,16 @@ def model_metrics(
         )
 
     return json.loads(METRICS_PATH.read_text(encoding="utf-8"))
+
+
+@app.get("/api/monitoring")
+def monitoring_dashboard(
+    current_user: dict = Depends(get_current_user),
+):
+    """Usage, CAB trust, real outcomes, input drift, prompt screening and
+    the retraining history - computed from the audit trail (src/monitoring.py)."""
+
+    return monitoring_report(get_all_assessments())
 
 
 class CreateUserRequest(BaseModel):

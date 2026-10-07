@@ -15,3 +15,7 @@ frontend_dist/
 
 # Downloaded public datasets (re-download with scripts)
 data/raw/
+
+# Previous models archived by scripts/retrain_with_feedback.py (rollback copies;
+# git history keeps every committed model anyway).
+models/archive/

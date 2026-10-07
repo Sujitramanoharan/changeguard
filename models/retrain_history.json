@@ -1,0 +1,32 @@
+[
+  {
+    "at": "2026-10-07 04:54 UTC",
+    "model": "ticket",
+    "feedback_rows": 0,
+    "feedback_bad": 0,
+    "demo_skipped": 5,
+    "weight": 5.0,
+    "test_rows": 5216,
+    "current_roc_auc": 0.9183,
+    "candidate_roc_auc": 0.9183,
+    "current_pr_auc": 0.3514,
+    "candidate_pr_auc": 0.3514,
+    "decision": "kept",
+    "reason": "Check run without feedback (--force): the candidate only reproduces the shipped model, so it is not promoted."
+  },
+  {
+    "at": "2026-10-07 04:54 UTC",
+    "model": "code",
+    "feedback_rows": 0,
+    "feedback_bad": 0,
+    "demo_skipped": 2,
+    "weight": 5.0,
+    "test_rows": 21335,
+    "current_roc_auc": 0.7981,
+    "candidate_roc_auc": 0.7981,
+    "current_pr_auc": 0.4403,
+    "candidate_pr_auc": 0.4403,
+    "decision": "kept",
+    "reason": "Check run without feedback (--force): the candidate only reproduces the shipped model, so it is not promoted."
+  }
+]

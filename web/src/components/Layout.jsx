@@ -8,6 +8,7 @@ import {
   LogOut,
   UserCircle,
   Users,
+  Activity,
 } from "lucide-react";
 import { api } from "../api";
 
@@ -27,6 +28,11 @@ const links = [
     to: "/history",
     label: "History",
     icon: HistoryIcon,
+  },
+  {
+    to: "/monitoring",
+    label: "Monitoring",
+    icon: Activity,
   },
   {
     to: "/about",

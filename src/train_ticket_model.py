@@ -54,8 +54,29 @@ def update_metrics(key: str, metrics: dict) -> None:
     METRICS_PATH.write_text(json.dumps(data, indent=2), encoding="utf-8")
 
 
-def train():
-    print("Building training table from BPIC 2014 ...")
+def new_model():
+    return lgb.LGBMClassifier(
+        n_estimators=300,
+        learning_rate=0.05,
+        num_leaves=31,
+        min_child_samples=40,
+        subsample=0.8,
+        subsample_freq=1,
+        colsample_bytree=0.8,
+        monotone_constraints=tr.MONOTONE_CONSTRAINTS,
+        monotone_constraints_method="advanced",
+        random_state=42,
+        verbose=-1,
+    )
+
+
+def prepare_table():
+    """The real training table with model-ready columns, and the 80/20 time cut.
+
+    Shared with scripts/retrain_with_feedback.py, so a retrained model is
+    fitted and evaluated on exactly the same rows as the shipped one.
+    """
+
     df = tr.build_training_table(BPIC_CHANGE_CSV, BPIC_INCIDENT_CSV)
 
     cut = int(len(df) * 0.8)
@@ -76,24 +97,19 @@ def train():
 
     categories = {col: list(df[col].cat.categories) for col in tr.CATEGORICAL}
 
+    return df, cut, family_rates, categories
+
+
+def train():
+    print("Building training table from BPIC 2014 ...")
+    df, cut, family_rates, categories = prepare_table()
+
     train_df, test_df = df.iloc[:cut], df.iloc[cut:]
 
     print(f"Rows: {len(df)} | train {len(train_df)} | test {len(test_df)}")
     print(f"Risky rate: train {train_df.risky.mean():.3f} | test {test_df.risky.mean():.3f}")
 
-    model = lgb.LGBMClassifier(
-        n_estimators=300,
-        learning_rate=0.05,
-        num_leaves=31,
-        min_child_samples=40,
-        subsample=0.8,
-        subsample_freq=1,
-        colsample_bytree=0.8,
-        monotone_constraints=tr.MONOTONE_CONSTRAINTS,
-        monotone_constraints_method="advanced",
-        random_state=42,
-        verbose=-1,
-    )
+    model = new_model()
     model.fit(train_df[tr.FEATURES], train_df.risky)
 
     probs = model.predict_proba(test_df[tr.FEATURES])[:, 1]

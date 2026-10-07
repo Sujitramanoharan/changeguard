@@ -191,7 +191,40 @@ The trained models are committed. To rebuild them from the public data:
 python scripts/download_datasets.py   # ~37 MB into data/raw/
 python src/train_ticket_model.py      # ~1 min
 python src/train_code_model.py        # ~1 min
+python scripts/build_reference_profile.py   # training-data profile for drift monitoring
 ```
+
+## Monitoring and the learning loop
+
+The **Monitoring** page (`/monitoring`, any signed-in user; API `GET /api/monitoring`)
+is computed from the audit trail:
+
+- **Usage:** recommendations per day by verdict, ticket vs code, and mode.
+- **Trust:** CAB decisions against the AI recommendation and the override rate
+  (overruling a firm APPROVE or REJECT; REVIEW leaves the call to the board).
+- **Outcomes:** for CAB-approved changes with a recorded result, how often the
+  changes the AI flagged failed compared with those it approved.
+- **Drift:** the Population Stability Index of each model input for live
+  assessments against the training data (`models/reference_profile.json`):
+  below 0.10 stable, 0.10–0.25 moderate, above 0.25 significant. Needs at least
+  20 assessments per model; under 100 the result is marked indicative.
+- **Security:** RedTeamGPT prompt-screening results.
+
+Recorded outcomes feed a gated retrain, run offline where `data/raw/` is:
+
+```bash
+python scripts/retrain_with_feedback.py            # both models
+python scripts/retrain_with_feedback.py --dry-run  # evaluate only
+python scripts/retrain_with_feedback.py --force    # reproducibility check
+```
+
+Each real outcome becomes a training row (Failed / Caused-Incident = risky,
+weight 5 by default). The candidate is evaluated on the same held-out test set
+as the shipped model - the newest 20% of the public data, which feedback never
+enters - and **replaces it only if its ROC-AUC is not lower**; the previous model
+is archived to `models/archive/`. Demo-seeded outcomes are never used. Every run
+is logged to `models/retrain_history.json` and shown on the Monitoring page;
+commit `models/` to deploy a promoted model.
 
 ## Running the test suite
 
