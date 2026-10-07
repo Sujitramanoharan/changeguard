@@ -48,9 +48,16 @@ def new_model():
     )
 
 
-def train():
+def load_table():
+    """ApacheJIT sorted by date, with the label column (shared with retraining)."""
+
     df = pd.read_csv(APACHEJIT_CSV).sort_values("author_date").reset_index(drop=True)
     df["y"] = df["buggy"].astype(int)
+    return df
+
+
+def train():
+    df = load_table()
     X = df[cr.FEATURES].astype(float)
 
     # ---- Unseen-project evaluation ----
