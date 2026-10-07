@@ -29,10 +29,12 @@ from langchain_core.messages import (
 from langchain_core.tools import tool
 from langgraph.graph import END, StateGraph
 
+import grounding
 import prompt_guard
 import ticket_risk
 from agent import (
     LLM_MODEL,
+    describe_ml,
     describe_document_evidence,
     describe_similar,
     fallback_justification,
@@ -81,7 +83,7 @@ EVIDENCE RULES:
 def ml_risk_score() -> str:
     """Risk model prediction for the current change, with its top factors."""
 
-    return json.dumps(ticket_risk.predict(_ticket()))
+    return describe_ml(ticket_risk.predict(_ticket()))
 
 
 @tool
@@ -197,6 +199,14 @@ JUSTIFICATION: <2-4 sentences using only evidence you actually gathered>
     text = text.strip()
     if text.upper().startswith("JUSTIFICATION:"):
         text = text[len("JUSTIFICATION:"):].strip()
+
+    # Everything the agent actually saw: the ticket and every tool result.
+    seen = "\n".join(str(m.content) for m in result["messages"] if not isinstance(m, AIMessage))
+    bad = grounding.unsupported_numbers(text, seen)
+    if bad:
+        print(f"[ChangeGuard LangGraph Warning] Explanation stated numbers no tool returned "
+              f"({', '.join(bad)}). Using fallback.")
+        return None, called
 
     return (text or None), called
 
