@@ -26,6 +26,7 @@ from datetime import datetime
 import config  # noqa: F401  (loads .env, network settings)
 
 import code_risk
+import grounding
 import prompt_guard
 import similarity
 import ticket_risk
@@ -189,6 +190,12 @@ JUSTIFICATION: <2-4 sentences using only facts supported by the evidence above.>
         if not text:
             raise ValueError("LLM returned an empty justification.")
 
+        bad = grounding.unsupported_numbers(text, evidence_text)
+        if bad:
+            print(f"[ChangeGuard Agent Warning] LLM explanation stated numbers not in the "
+                  f"evidence ({', '.join(bad)}). Using rule-grounded fallback.")
+            return None, "fallback"
+
         return text, "llm"
 
     except Exception as err:
@@ -199,11 +206,31 @@ JUSTIFICATION: <2-4 sentences using only facts supported by the evidence above.>
         return None, "fallback"
 
 
-def evidence_text(header: str, ml: dict, similar: list, evidence: dict) -> str:
+def describe_ml(ml: dict) -> str:
+    """The model's prediction as labelled plain text.
+
+    The raw prediction dict also carries the historical base rate, a 0-1
+    risk index and SHAP log-odds - decimals of similar size an LLM can
+    easily attach to the wrong quantity. Only the labelled facts go out.
+    """
+
+    source = "ApacheJIT code model" if ml.get("model") == "code" else "Rabobank change model"
     factors = "\n".join(
         f"   - {f['label']} = {f['value']} ({f['direction']})"
         for f in ml.get("factors", [])
     )
+    return (
+        f"ML RISK MODEL ({source}):\n"
+        f"   Predicted probability for THIS change = {ml['risk_probability']} "
+        f"({ml['risk_probability'] * 100:.2f}%)\n"
+        f"   Average across all historical changes = {ml['base_rate'] * 100:.1f}%\n"
+        f"   Relative risk = {ml['relative_risk']}x a typical change\n"
+        f"   Model risk level = {ml['risk_level']}\n"
+        f"TOP FACTORS (SHAP):\n{factors}"
+    )
+
+
+def evidence_text(header: str, ml: dict, similar: list, evidence: dict) -> str:
     sims = "\n".join(
         f"   - {s['change_id']} ({s['system']}, {s.get('date', '')}): {s['outcome']}"
         for s in similar
@@ -216,12 +243,7 @@ def evidence_text(header: str, ml: dict, similar: list, evidence: dict) -> str:
     return f"""{header}
 
 EVIDENCE GATHERED:
-1. ML RISK MODEL ({'ApacheJIT code model' if ml['model'] == 'code' else 'Rabobank change model'}):
-   Probability = {ml['risk_probability']} ({ml['relative_risk']}x the average change)
-   Model risk level = {ml['risk_level']}
-
-2. TOP FACTORS (SHAP):
-{factors}
+1-2. {describe_ml(ml)}
 
 3. MOST SIMILAR REAL HISTORICAL CHANGES:
 {sims}
