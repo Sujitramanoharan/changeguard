@@ -28,5 +28,70 @@
     "candidate_pr_auc": 0.4403,
     "decision": "kept",
     "reason": "Check run without feedback (--force): the candidate only reproduces the shipped model, so it is not promoted."
+  },
+  {
+    "at": "2026-10-07 05:26 UTC",
+    "model": "ticket",
+    "feedback_rows": 0,
+    "feedback_bad": 0,
+    "demo_skipped": 5,
+    "weight": 5.0,
+    "decision": "skipped",
+    "reason": "No real outcomes recorded since training - nothing new to learn."
+  },
+  {
+    "at": "2026-10-07 05:26 UTC",
+    "model": "code",
+    "feedback_rows": 0,
+    "feedback_bad": 0,
+    "demo_skipped": 2,
+    "weight": 5.0,
+    "decision": "skipped",
+    "reason": "No real outcomes recorded since training - nothing new to learn."
+  },
+  {
+    "at": "2026-10-07 06:25 UTC",
+    "model": "ticket",
+    "feedback_rows": 0,
+    "feedback_bad": 0,
+    "demo_skipped": 5,
+    "weight": 5.0,
+    "decision": "skipped",
+    "reason": "No real outcomes recorded since training - nothing new to learn."
+  },
+  {
+    "at": "2026-10-07 06:25 UTC",
+    "model": "code",
+    "feedback_rows": 0,
+    "feedback_bad": 0,
+    "demo_skipped": 2,
+    "weight": 5.0,
+    "decision": "skipped",
+    "reason": "No real outcomes recorded since training - nothing new to learn."
+  },
+  {
+    "at": "2026-10-07 06:31 UTC",
+    "model": "ticket",
+    "feedback_rows": 2,
+    "feedback_bad": 1,
+    "demo_skipped": 5,
+    "weight": 5.0,
+    "test_rows": 5216,
+    "current_roc_auc": 0.9183,
+    "candidate_roc_auc": 0.9173,
+    "current_pr_auc": 0.3514,
+    "candidate_pr_auc": 0.347,
+    "decision": "kept",
+    "reason": "Candidate is worse on the held-out test set."
+  },
+  {
+    "at": "2026-10-07 06:31 UTC",
+    "model": "code",
+    "feedback_rows": 0,
+    "feedback_bad": 0,
+    "demo_skipped": 2,
+    "weight": 5.0,
+    "decision": "skipped",
+    "reason": "No real outcomes recorded since training - nothing new to learn."
   }
 ]

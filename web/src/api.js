@@ -198,6 +198,7 @@ export const api = {
     post(`/assessments/${id}/outcome`, { outcome }),
   modelMetrics: () => get("/model/metrics"),
   monitoring: () => get("/monitoring"),
+  health: () => fetch("/health").then((r) => r.json()),
   listUsers: () => get("/admin/users"),
   createUser: (user) => post("/admin/users", user),
   deleteUser: (username) =>

@@ -8,8 +8,8 @@ import {
   SimilarList,
   EvidenceGrid,
   SectionTitle,
-  screeningLabel,
 } from "../components/RiskInsights";
+import { screeningLabel } from "../screening";
 import {
   Cpu,
   Sparkles,

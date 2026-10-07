@@ -114,6 +114,14 @@ def calculate_risk_policy(
         recommendation = "REVIEW"
         risk_level = "Medium"
 
+    # Without a way back, a change that fails stays failed - however
+    # unlikely the model thinks failure is. A person must accept that.
+    # (Code changes count as revertible unless they alter a database
+    # schema with no reverse migration; see agent.code_rollback_readiness.)
+    if not has_rollback and recommendation == "APPROVE":
+        recommendation = "REVIEW"
+        risk_level = "Medium"
+
     # Text written to manipulate the reviewer (flagged by RedTeamGPT, see
     # prompt_guard.py) says nothing about technical risk, so it does not
     # move the score - but a person must look at a change that contains it.

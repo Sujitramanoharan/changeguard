@@ -49,6 +49,31 @@ def test_missing_rollback_plan_escalates_risk():
     assert no_rollback["has_rollback"] is False
 
 
+def test_change_without_rollback_plan_is_never_auto_approved():
+    # Very low model risk: the score alone (0.25 + tiny) stays under REVIEW.
+    result = calculate_risk_policy(
+        ml={"risk_index": 0.02},
+        change=make_change(rollback_plan_exists="No"),
+        similar=[],
+        schedule={"conflict_frequency": 0.0},
+    )
+
+    assert result["score"] < 0.30
+    assert result["recommendation"] == "REVIEW"
+    assert result["risk_level"] == "Medium"
+
+
+def test_untested_rollback_plan_can_still_be_approved():
+    result = calculate_risk_policy(
+        ml={"risk_index": 0.02},
+        change=make_change(rollback_plan_tested="No"),
+        similar=[],
+        schedule={"conflict_frequency": 0.0},
+    )
+
+    assert result["recommendation"] == "APPROVE"
+
+
 def test_untested_rollback_penalized_less_than_missing_rollback():
     untested = calculate_risk_policy(
         ml={"risk_probability": 0.1},

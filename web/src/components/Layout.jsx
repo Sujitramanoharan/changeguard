@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import { NavLink, Outlet } from "react-router-dom";
 import {
   LayoutDashboard,
@@ -165,7 +166,9 @@ export default function Layout() {
 
       {/* Main content */}
       <main className="flex-1 min-w-0 ml-64 min-h-screen px-8 py-8 max-w-[1360px]">
-        <Outlet />
+        <Suspense fallback={<div className="py-16 text-center text-sm text-slate-400 animate-pulse">Loading…</div>}>
+          <Outlet />
+        </Suspense>
       </main>
     </div>
   );
