@@ -11,6 +11,7 @@ export default function Dashboard() {
   const [history, setHistory] = useState([]);
   const [loading, setLoading] = useState(true);
   const [selectedItem, setSelectedItem] = useState(null);
+  const [database, setDatabase] = useState(null);
 
   const load = () =>
     Promise.all([api.stats(), api.history()])
@@ -23,6 +24,7 @@ export default function Dashboard() {
 
   useEffect(() => {
     load();
+    api.health().then((h) => setDatabase(h.database)).catch(() => {});
   }, []);
 
   const total = stats?.total || 0;
@@ -192,7 +194,11 @@ export default function Dashboard() {
               <Cpu className="w-4 h-4 text-indigo-600" />
               Showing top 5 recent CAB evaluation logs
             </span>
-            <span className="font-mono text-[11px] text-slate-400">Database: changeguard.db</span>
+            {database && (
+              <span className="font-mono text-[11px] text-slate-400">
+                Database: {database === "postgresql" ? "PostgreSQL" : "SQLite"}
+              </span>
+            )}
           </div>
         </div>
 

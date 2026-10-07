@@ -1,7 +1,8 @@
 import React, { useState } from "react";
 import Badge from "./Badge";
 import { api } from "../api";
-import { RiskGauge, FactorBars, SimilarList, EvidenceGrid, SectionTitle, screeningLabel } from "./RiskInsights";
+import { RiskGauge, FactorBars, SimilarList, EvidenceGrid, SectionTitle } from "./RiskInsights";
+import { screeningLabel } from "../screening";
 import { X, Layers, Cpu, Copy, FileText, Gavel, ClipboardCheck, BarChart3, GitCommit, ClipboardList, ExternalLink } from "lucide-react";
 
 export default function AssessmentDetailModal({ item: initialItem, onClose, onUpdated }) {

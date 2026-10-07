@@ -195,7 +195,10 @@ def to_frame(ticket: dict, bundle: dict) -> pd.DataFrame:
     X = pd.DataFrame([row])
 
     for col in CATEGORICAL:
-        X[col] = pd.Categorical(X[col], categories=bundle["categories"][col])
+        # A category the model never saw becomes missing (LightGBM handles
+        # that); passing it through is deprecated and will raise in pandas.
+        known = bundle["categories"][col]
+        X[col] = pd.Categorical(X[col].where(X[col].isin(known)), categories=known)
 
     for col in NUMERIC:
         X[col] = pd.to_numeric(X[col], errors="coerce").astype(float)
